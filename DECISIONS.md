@@ -79,3 +79,31 @@ function for quality and a strong credibility/dogfooding story for an open-sourc
 "Hermes" rejected (it's an existing agent + overloaded name). Maintainer wants "jam"
 (also their handle; مربا = jam) in the name. Candidates: Jamory, Jamgate, Jamjar,
 Jamkeep, Jamoire, Jamind. Not yet decided.
+
+### D-015 — Time-aware memory: recency and supersession
+Every memory is a **timestamped event, not a standing rule**. The system must tell
+two things apart: (a) a *superseded state* — a newer entry about the same subject
+automatically replaces the older one because it is newer (e.g. "uses Windows" (Mar)
+→ "moved to Linux" (Jun)); no prompt, not labeled a "contradiction" — versus (b) a
+*genuine contradiction* — two claims that purport to hold at the **same** time and
+cannot both be true → flag / ask. **Why:** the worst real-world failure is an agent
+treating an outdated past statement as the user's *current* commitment ("you said X
+15 minutes / 4 days ago — why did you change your mind?"). Recency wins; never
+confront the user with their own stale words as if they were current. Extends the
+contradiction check (§2.3) and the expiry model (§4); both need timestamps to be
+first-class.
+
+### D-016 — Reframe: the product is a shared cross-agent memory OF THE USER; the gate is the mechanism
+Refines and supersedes the framing in D-001. The purpose is **not** primarily
+"decide what is worth keeping" (salience). It is: **one neutral memory of the user —
+identity, mood, and above all current work / projects — that every MCP-capable agent
+reads from and writes to**, so agents stop being isolated islands and the user never
+has to re-brief each one. The write-time quality gate (salience, dedup, contradiction,
+expiry) is the *mechanism* that keeps this shared memory clean and trustworthy — not
+the headline. **Durable wedge = neutrality (sits in front of ANY store, including
+mem0) + write-time selectivity.** Note: Zep/Graphiti already does temporal
+contradiction handling via validity windows, but only inside its own heavy graph
+store — not as a neutral gate in front of any store — and mem0 has no write-time
+scoring, so the neutral-gate-with-selectivity combination is still open. **Stat
+correction:** the "98% junk" figure is actually **97.8%** from one mem0 production
+audit (github.com/mem0ai/mem0 issue #4573) — cite as one audit, not a universal claim.

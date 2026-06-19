@@ -34,3 +34,14 @@ Current state of the project. Update this at the end of every work session.
 These files are plain text. The portability mechanism is **git**: commit them, push,
 then `git clone` on Linux and everything (rules + state) comes with it. On Linux,
 `ln -s AGENTS.md CLAUDE.md` so one file serves every agent.
+
+## Update — 2026-06-19 (reframe session)
+- **Core purpose reframed (see D-016):** the product is a *shared cross-agent memory
+  of the user* (who I am, my mood, and above all what I'm working on now), so agents
+  stop being islands. The quality gate is the mechanism, not the headline. The old
+  docs over-emphasized "deciding what's worth keeping" (salience).
+- **New decision D-015:** time-aware memory — recency & supersession; distinguish a
+  superseded state (newer auto-wins) from a genuine contradiction (flag/ask).
+- **Pending prose rewrite** to match D-015/D-016: RULES §0, §2 (ordering + timestamps),
+  §3 title ("core IP"), §4; AGENTS.md "core idea"; README opening + the 97.8% stat
+  with its source.
