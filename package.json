@@ -1,0 +1,27 @@
+{
+  "name": "jamgate",
+  "version": "0.0.1",
+  "description": "A neutral, cross-agent memory quality gate, delivered as an MCP server.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "jamgate": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "pretest": "tsc -p tsconfig.test.json",
+    "test": "node --test dist-test/test/"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
