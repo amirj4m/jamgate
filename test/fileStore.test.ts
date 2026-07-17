@@ -13,8 +13,9 @@ describe("FileStore persistence", () => {
     try {
       await new FileStore(path).save({ text: "jam uses Linux", source: "user-explicit" });
       const raw = JSON.parse(await fs.readFile(path, "utf8"));
-      assert.equal(raw.length, 1);
-      assert.equal(raw[0].text, "jam uses Linux");
+      assert.equal(raw.schemaVersion, 2);
+      assert.equal(raw.memories.length, 1);
+      assert.equal(raw.memories[0].text, "jam uses Linux");
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
@@ -41,7 +42,7 @@ describe("FileStore persistence", () => {
     try {
       await new FileStore().save({ text: "jam uses Linux", source: "user-explicit" });
       // The file exists at the overridden path, not the default under $HOME.
-      assert.equal(JSON.parse(await fs.readFile(path, "utf8")).length, 1);
+      assert.equal(JSON.parse(await fs.readFile(path, "utf8")).memories.length, 1);
     } finally {
       if (previous === undefined) delete process.env.JAMGATE_STORE;
       else process.env.JAMGATE_STORE = previous;
