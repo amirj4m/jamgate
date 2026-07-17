@@ -1,9 +1,29 @@
-# MEMORY.md — Jam (working codename)
+# MEMORY.md — Jamgate
 
 Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
-- **Phase: design complete, scaffolding not started.**
+- **Phase: name locked (Jamgate, D-017); MVP skeleton scaffolded.**
+- Code skeleton present: `package.json`, `tsconfig.json`, `.gitignore`, and `src/`
+  (`index.ts` MCP server over stdio; `store/fileStore.ts` flat-JSON store with
+  save/recall/forget + exact-dup dedup + timestamps; `gate/prefilter.ts` cheap rule
+  pre-filter). Compiles clean with `tsc`; 7/7 logic smoke-tests pass (junk rejected,
+  real fact kept, dedup, recall, forget).
+- **Installed + built on the user's machine** (2026-06-19): `npm install` (94 pkgs,
+  `package-lock.json` committed-pending) and `npm run build` ran into `~/Documents/
+  jamgate`; `dist/` present. **Real MCP protocol test PASSED** via an SDK stdio client:
+  tools listed (save/recall/forget), a real fact saved, junk ("ok") rejected, recall
+  returned the fact.
+- **Time-aware supersession DONE (D-015, §2.3):** memories carry a `subject`, `status`
+  (active/superseded), and supersededBy/At. A newer memory with the same subject
+  retires the older by recency (kept for audit, not deleted); recall returns active
+  only. Verified end-to-end over MCP — "jam uses Windows" → "jam moved to Linux"
+  retires Windows and recall shows only Linux. 6/6 store checks pass (create, exact-dup
+  blocked, supersede, active-only recall, history kept, forget).
+- NOT yet: genuine simultaneous-contradiction detection (flag/ask) and auto-deriving
+  `subject` without the agent passing it — both need the thin classifier/embeddings
+  (later). The §9 test against the user's *own* live agent still needs the user to wire
+  the MCP config and click through.
 - We spent a long session defining the concept, architecture, and rules. All of it is
   captured in `AGENTS.md`, `RULES.md`, and `DECISIONS.md`.
 - These six files (`AGENTS.md`, `CLAUDE.md`, `RULES.md`, `DECISIONS.md`, `MEMORY.md`,
@@ -16,17 +36,16 @@ Current state of the project. Update this at the end of every work session.
 - v1 = MCP surfaces (Claude Code / Cowork / Cursor); web chatbots phase 2.
 - AGENTS.md is canonical; symlink CLAUDE.md / GEMINI.md to it on Linux.
 
-## What's next (first build steps)
-1. Pick the project name (see OPEN in DECISIONS.md).
-2. Scaffold the repo: `npm init`, add `@modelcontextprotocol/sdk`, TS config.
-3. Stand up the smallest working MCP server exposing `save_memory` / `recall_memory`
-   with a flat-file store and **layer 1 of the gate only** (the cheap rule pre-filter).
-4. Connect it to a real MCP agent and test save/recall end-to-end.
-5. Add the gate layers one at a time: dedup → contradiction → expiry → thin classifier.
-6. `git init`, first commit, push to GitHub (account: amirj4m), MIT license.
+## What's next
+Steps 1–4 of the original build plan are done (name chosen, repo scaffolded, MCP server
+standing, verified against a real agent). Remaining:
+1. Finish the gate layers: expiry/TTL → thin classifier for ambiguous cases.
+   (dedup, supersession, and the trust-based conflict guard are done.)
+2. Derive `subject` automatically instead of relying on the calling agent to pass it.
+3. Atomic writes for the file store.
+4. Multi-device sync (D-018).
 
 ## Open items
-- Project name not chosen.
 - Embedding model choice (local vs API) for dedup/recall — decide at step 5.
 - Exact threshold/scoring for the "worth keeping" criterion — tune with real data.
 
@@ -42,6 +61,20 @@ then `git clone` on Linux and everything (rules + state) comes with it. On Linux
   docs over-emphasized "deciding what's worth keeping" (salience).
 - **New decision D-015:** time-aware memory — recency & supersession; distinguish a
   superseded state (newer auto-wins) from a genuine contradiction (flag/ask).
-- **Pending prose rewrite** to match D-015/D-016: RULES §0, §2 (ordering + timestamps),
-  §3 title ("core IP"), §4; AGENTS.md "core idea"; README opening + the 97.8% stat
-  with its source.
+- **Prose rewrite DONE (2026-06-19)** to match D-015/D-016: RULES §0, §2 (supersession
+  vs contradiction + timestamps), §3 title, §4 (recency), §5 stat; AGENTS.md "what
+  this is" + "core idea"; README problem/idea/how-it-works + 97.8% stat with source.
+- **Name chosen: Jamgate (D-017).** Multi-device sync design recorded (D-018). README
+  now has a real Quickstart + accurate Status.
+- **Genuine-contradiction handling DONE (trust-based, §2.3):** a lower-trust source
+  (agent-inferred) can no longer silently overwrite a higher-trust one (user-explicit)
+  on the same subject — it returns action "conflict" and asks for confirmation instead.
+  Equal-or-higher trust still supersedes by recency. 5/5 conflict tests pass.
+- **Storage adapter boundary DONE (D-019):** shared types + a `MemoryStore` interface
+  live in `src/store/types.ts`; `FileStore` implements it; the server depends on the
+  interface, not the backend — so a SQLite/Supabase store drops in later without a
+  rewrite. Two-tier plan recorded: local/npm now, hosted cloud (v2) later. Build clean,
+  7/7 store checks pass after the refactor.
+- **Still open:** thin classifier for ambiguous/semantic cases; embedding model
+  (local vs API); scoring threshold; multi-device sync (D-018); git first commit/remote
+  + push to GitHub (deferred — do later).

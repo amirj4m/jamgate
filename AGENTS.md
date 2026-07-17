@@ -1,4 +1,4 @@
-# AGENTS.md — Jam (working codename · final name TBD)
+# AGENTS.md — Jamgate
 
 > **First thing every session: read [`RULES.md`](./RULES.md) in full.**
 > This file is the always-in-context summary. `RULES.md` has the detail and edge
@@ -11,31 +11,39 @@
 
 ## What this project is (one paragraph)
 
-A **neutral, cross-agent memory QUALITY GATE**, delivered as an **MCP server**. It
-sits in the *write path* between any AI agent (Claude Code, Cowork, Cursor, …) and
-any memory store, and decides **what is actually worth remembering** — solving the
-"98% junk" problem that every existing memory system has. It is store-agnostic
-(bundles a default store for normal users; lets power users bring their own such as
-mem0 or Graphiti). It is **open-source and impact-driven, not a profit play.**
+**One shared, cross-agent memory of the user** — who they are, how they're doing, and
+above all what they're working on right now — delivered as an **MCP server** that any
+agent (Claude Code, Cowork, Cursor, …) reads from and writes to, so agents stop being
+isolated islands and the user never re-briefs each one. A **write-time quality gate**
+keeps that shared memory clean, current, contradiction-free and time-aware (otherwise
+sharing just spreads junk). It is store-agnostic (bundles a default store for normal
+users; lets power users bring their own such as mem0 or Graphiti) and **open-source,
+impact-driven, not a profit play.**
 
 ## The core idea (why it exists)
 
-Storing memory is easy and already done many times over (mem0, Graphiti, Cognee,
-Supermemory…). The unsolved problem is **write-time selection**: deciding what to
-keep and what to throw away. Existing systems auto-save everything via a vague "LLM,
-extract memories" call → ~98% of stored memories are junk. **We are the brain that
-decides, not another warehouse.**
+Every agent you use is an island: each has its own memory and none share. Naive
+sharing fails because the systems that store everything bloat with junk — one mem0
+production audit found 97.8% junk (github.com/mem0ai/mem0 issue #4573). Storing is
+solved (mem0, Graphiti, Cognee, Supermemory…) and even salience is mostly the calling
+agent's job. The unsolved seam is **a neutral layer that keeps ONE shared memory
+clean, time-aware and contradiction-free across every agent**, sitting in front of
+any store rather than locked to one. Zep/Graphiti does temporal conflict-handling but
+only inside its own heavy store; neutrality + write-time selectivity in front of any
+store is still open. **We are the brain that keeps the shared memory honest, not
+another warehouse.**
 
 ## Architecture (one picture)
 
 ```
-Agent  →  [ JAM quality gate · MCP server ]  →  Store (default file/SQLite, or BYO: mem0 / Graphiti)
+Agent  →  [ Jamgate quality gate · MCP server ]  →  Store (default file/SQLite, or BYO: mem0 / Graphiti)
           save_memory / recall_memory / forget_memory
           only quality-passing writes get through
 ```
 
-The gate is the value. The store is a hidden implementation detail. A normal user
-installs the gate and gets "memory that just works" and never hears the word "mem0".
+The shared, clean memory is the value; the gate is how it stays clean; the store is a
+hidden implementation detail. A normal user installs the gate and gets "memory that
+just works" across all their agents, and never hears the word "mem0".
 
 ## Stack (MVP)
 

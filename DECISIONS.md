@@ -1,4 +1,4 @@
-# DECISIONS.md — Jam (working codename)
+# DECISIONS.md — Jamgate
 
 Decision log. Each entry: what we decided and why. Don't silently reverse these — if
 you change one, add a new entry that supersedes it.
@@ -75,10 +75,11 @@ Write these rule files halfway by hand, then continue building the project *usin
 memory system itself* — à la Linus writing Git with Git. **Why:** it's both a forcing
 function for quality and a strong credibility/dogfooding story for an open-source project.
 
-### OPEN — Project name
-"Hermes" rejected (it's an existing agent + overloaded name). Maintainer wants "jam"
-(also their handle; مربا = jam) in the name. Candidates: Jamory, Jamgate, Jamjar,
-Jamkeep, Jamoire, Jamind. Not yet decided.
+### D-017 — Project name: Jamgate
+Chosen 2026-06-19. "jam" is the maintainer's handle, "gate" states the quality-gate
+concept directly, and the compound doubles as a pun in the maintainer's first language.
+Beats the other candidates (Jamory, Jamjar, Jamkeep, Jamoire, Jamind) on clarity + recall.
+("Hermes" was rejected earlier — existing agent, overloaded name.)
 
 ### D-015 — Time-aware memory: recency and supersession
 Every memory is a **timestamped event, not a standing rule**. The system must tell
@@ -107,3 +108,29 @@ store — not as a neutral gate in front of any store — and mem0 has no write-
 scoring, so the neutral-gate-with-selectivity combination is still open. **Stat
 correction:** the "98% junk" figure is actually **97.8%** from one mem0 production
 audit (github.com/mem0ai/mem0 issue #4573) — cite as one audit, not a universal claim.
+
+### D-018 — Multi-device sync (future): user-held keys + pluggable transport
+When cross-device sync is added, keep BOTH privacy and sync by (1) separating the gate
+from the sync layer and (2) end-to-end encrypting the notebook with a key only the user
+holds — so whatever moves it sees only ciphertext. Transport is pluggable, simplest
+first: (a) a sync folder the user already has (Dropbox / iCloud / Syncthing) — zero
+server, zero cost, fits local-first; (b) an encrypted relay for convenience later;
+(c) the user's own cloud DB (e.g. their own Supabase). **Why:** "data stays in the
+user's hands" = the user holds the key, not us. Conflict resolution reuses D-015:
+per-subject, newer-by-timestamp wins, so the time-aware design is already merge-ready.
+v1 stays single-device; this is a deferred decision, not MVP scope.
+
+### D-019 — Two tiers (local + cloud), sequenced; storage behind an adapter boundary
+Offer two ways to run, built in order. (1) **Local / npm first** — install or `npx
+jamgate`; data on the user's machine; single device; max privacy; proves the gate and
+serves technical early adopters at zero hosting cost. (2) **Hosted cloud later (v2)** —
+a website where the user copies a config + key into their agent; data on a known secure
+service (e.g. Supabase); works across all devices; near-zero install for everyone — the
+most recognized, lowest-friction adoption path. **Why sequenced:** the cloud tier brings
+real obligations — GDPR/privacy duties (maintainer is in the EU), security/breach
+responsibility, and ongoing hosting cost with no revenue (must decide who funds it).
+**Key enabler now:** keep the store behind a clean adapter interface (file / SQLite /
+Supabase are interchangeable implementations); the gate and server depend only on that
+interface, so adding the cloud store later is a drop-in, not a rewrite. Open v2
+sub-decision: our-hosted Supabase (easier for users, more liability for us) vs the
+user's own Supabase (less liability, more setup). Extends D-006 and D-010.

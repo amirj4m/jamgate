@@ -1,4 +1,4 @@
-# RULES.md — Jam (working codename)
+# RULES.md — Jamgate
 
 The single source of truth for this project. No claim of "done" / "wired" counts
 unless every relevant rule below is demonstrably satisfied. If in doubt → not done.
@@ -7,15 +7,35 @@ unless every relevant rule below is demonstrably satisfied. If in doubt → not 
 
 ## 0. What we are building (and what we are NOT)
 
-- **We are building a quality GATE, not a memory store.** Storage is a commodity
-  (mem0, Graphiti, Cognee, Supermemory already own it). Our value is deciding
-  *what is worth remembering* at write time.
+- **We are building one shared, cross-agent memory OF THE USER** — who they are, how
+  they're doing, and above all what they're working on right now — that every
+  MCP-capable agent reads from and writes to, so agents stop being isolated islands
+  and the user never has to re-brief each one. (See D-016.)
+- **The quality GATE is the mechanism, not the headline.** Storage is a commodity
+  (mem0, Graphiti, Cognee, Supermemory already own it). Our job is to keep that
+  shared memory **clean, current, contradiction-free, and time-aware** at write time —
+  otherwise sharing just spreads junk (one mem0 audit found 97.8% junk; see D-016).
 - **Neutral and store-agnostic.** The gate sits in front of *any* store and *any*
-  agent. It must never be locked to one store or one vendor.
+  agent. It must never be locked to one store or one vendor. (Zep/Graphiti already
+  does temporal conflict-handling, but only inside its own store — neutrality +
+  write-time selectivity in front of *any* store is the open seam.)
 - **Open-source, impact-first.** Optimize for adoption and usefulness, not revenue.
   Open + neutral is the strength here, not a weakness.
 - **Do NOT build "yet another MCP memory server" that just stores.** That space is
-  taken and we lose. Our only durable opening is **write-time quality + neutrality.**
+  taken and we lose. Our durable opening is **neutrality + clean, time-aware
+  write-time integration.**
+- **THE MOAT — why a big vendor can't kill us with a button.** The defensible core is
+  **neutrality + user-ownership + local-first**, NOT the quality algorithm. The quality
+  gate is a *feature* any store or platform can bolt on. But a **neutral, cross-vendor
+  memory the user OWNS** is something incumbents *structurally will not* ship — it
+  breaks their lock-in (ChatGPT memory deliberately doesn't share with Claude; each
+  vendor walls its own). Any "memory" button they ship works only *inside their own
+  walls*. So: compete on **portable + user-owned + local**, and use **quality** only to
+  make that shared memory usable (sharing without the gate just spreads junk).
+  **Headline:** *"your own memory, on your own disk, that follows you across every AI
+  agent and stays clean."* Residual risk: an open standard / MCP-native memory spec
+  could commoditize this → answer: stay small and sharp, ship fast, become the default
+  neutral layer before a standard arrives.
 
 ## 1. Architecture
 
@@ -33,24 +53,37 @@ Agent → [ quality gate / MCP server ] → Store (default file/SQLite, or BYO m
 
 ## 2. The write pipeline — 6 checks before anything is stored
 
-When a `save_memory` arrives, run these in order. Reject or reshape, don't blindly append:
+When a `save_memory` arrives, run these. Reject or reshape, don't blindly append.
+Checks 2, 3 and 5 are the **stateful, time-aware integration** — the part no calling
+agent can do (it can't see the whole prior memory) and the real core of the gate:
 
 1. **Worth it? (salience)** — durable AND changes future answers? If it's chatter or
-   one-time, reject.
+   one-time, reject. (The calling agent is the main judge here; see §5.)
 2. **Duplicate?** — already known → update/merge, do not add a second copy.
-3. **Contradiction?** — conflicts with an existing memory (e.g. "uses Windows" vs new
-   "moved to Linux") → invalidate/replace the old one, never keep both.
+3. **Supersession vs contradiction?** — does this concern something we already know?
+   - *Superseded state* — a newer fact about the same subject (e.g. "uses Windows"
+     (older) → "moved to Linux" (newer)). The newer one **wins automatically because
+     it is newer**; invalidate/replace the old, do not prompt, do not call it a
+     "contradiction".
+   - *Genuine contradiction* — two claims that purport to hold at the **same time**
+     and can't both be true → flag / ask the user.
+   Never keep conflicting copies; never confront the user with their own stale words
+   as if current. (See D-015.)
 4. **Type + structure** — tag it (identity / project / preference / state) and
    normalize into a clean memory object.
-5. **Expiry / lifespan** — assign a freshness window by type (see §4).
+5. **Timestamp + expiry / lifespan** — record *when* it was asserted and assign a
+   freshness window by type (see §4). Every memory is a timestamped event, not a
+   standing rule.
 6. **Source + confidence** — record origin (`agent-inferred` / `user-confirmed` /
    `user-explicit`) and a confidence score.
 
 Only after passing all six does it get written.
 
-## 3. The "worth keeping" criterion (this is the core IP)
+## 3. The "worth keeping" criterion (one input, not the whole product)
 
-Break "worth it" into checkable sub-questions and score them:
+Salience is one check, not the core IP — the calling agent does most of this judgment
+already (§5). The gate's real differentiation is the stateful, time-aware integration
+in §2.2–2.3 and §4. Still, score "worth it" with checkable sub-questions:
 
 - **Type:** is it a fact / decision / preference / state — or just passing chatter?
 - **Durable:** will it still be true after this session ends?
@@ -73,10 +106,14 @@ user.** Route uncertainty to the human; it keeps quality high and is cheap.
 Layers 4–5 are valuable **and** volatile **and** sensitive — short TTL, prefer
 user-confirmation, and make them easy to view and delete.
 
+Every entry is **timestamped**. When a newer entry supersedes an older one about the
+same subject, the newer wins by recency (see §2.3, D-015); old states are retired,
+not kept as live facts.
+
 ## 5. Decision logic — hybrid pipeline (NOT pure-AI, NOT pure-rules)
 
-Pure "LLM, extract memories" is exactly what produces 98% junk. Pure hard-coded
-rules can't make a semantic judgment. So:
+Pure "LLM, extract memories" is exactly what produces the junk problem (one mem0
+audit found 97.8%; see D-016). Pure hard-coded rules can't make a semantic judgment. So:
 
 1. **Cheap rule pre-filter** — kill the obvious junk (too short, pleasantries, no
    real content, recent duplicate) *before* spending any AI.
