@@ -87,10 +87,26 @@ Early but real. The MVP core works today: a local, zero-cost MCP server (TypeScr
 exposing `save_memory` / `recall_memory` / `forget_memory` over a flat-file store, with
 a rule pre-filter, exact-duplicate dedup, time-aware supersession (newer facts retire
 older ones by recency), and a source-trust conflict guard (a lower-trust source cannot
-silently overwrite a higher-trust one — it asks instead). Verified end-to-end over the
-MCP protocol and covered by an automated test suite. Next: a thin classifier for
-ambiguous cases, deriving `subject` automatically, and multi-device sync
-(see `DECISIONS.md`). **Goal: impact, not profit — open-source (MIT), built in the open.**
+silently overwrite a higher-trust one — it asks instead).
+
+**Phase 2 (robustness) is done** — your data can't be corrupted, and stale memory
+retires itself:
+
+- **Atomic, durable writes** — the store is written to a temp file, fsync'd, and renamed
+  over the target, so an interrupted write (crash, power loss) never leaves a torn file.
+- **Type-based expiry** — every memory gets a freshness window from its type (identity
+  and preferences never expire; projects ~90 days; volatile state ~2 days; all
+  overridable via `JAMGATE_TTL_<TYPE>_DAYS`). Expired records stop surfacing in recall
+  but are kept for audit until a compaction step removes the long-dead ones.
+- **Concurrency safety** — two agents pointed at the same file are serialized by a lock
+  file (with stale-lock detection) plus re-read-before-write, so no write is lost.
+- **Schema versioning** — the file carries a `schemaVersion` and older formats migrate
+  automatically, so existing memory files keep working across upgrades.
+
+Verified end-to-end over the MCP protocol and covered by an automated test suite. Next:
+a thin classifier for ambiguous cases, deriving `subject` automatically, and
+multi-device sync (see `DECISIONS.md`). **Goal: impact, not profit — open-source (MIT),
+built in the open.**
 
 ## Development
 

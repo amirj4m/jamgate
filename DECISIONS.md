@@ -134,3 +134,53 @@ Supabase are interchangeable implementations); the gate and server depend only o
 interface, so adding the cloud store later is a drop-in, not a rewrite. Open v2
 sub-decision: our-hosted Supabase (easier for users, more liability for us) vs the
 user's own Supabase (less liability, more setup). Extends D-006 and D-010.
+
+---
+
+## Phase 2 — Robustness (user data can never be corrupted; memory retires itself)
+
+### D-020 — Atomic, durable file writes (temp + fsync + rename)
+The FileStore never writes the target file in place. It serializes to a temp file in the
+**same directory**, `fsync`s it, then `rename`s over the target. **Why:** an in-place
+write that is interrupted (crash, power loss, `kill`) leaves a half-written, unparseable
+store — catastrophic for a trust project whose whole promise is "your data can't be
+corrupted." `rename(2)` is atomic on a POSIX local filesystem, so a reader or a crash
+sees either the whole old file or the whole new one, never a torn one; keeping the temp
+in the same directory guarantees the rename stays on one filesystem (a cross-device
+rename is a copy, not atomic). Windows/network-FS caveats are documented in code. Phase 2.
+
+### D-021 — Type-based TTL / expiry with soft-expire + compaction
+Each memory gets an `expiresAt` derived from its `type` at save time, per the 5-layer
+model (§4): identity/preference never expire, projects last ~90 days, volatile state
+~2 days. Defaults are overridable via env (`JAMGATE_TTL_<TYPE>_DAYS`, value in days or
+`never`). Expiry is **soft**: expired records are hidden from recall but not deleted, so
+they remain auditable/recoverable. A separate compaction step physically removes records
+only once they have been expired past a grace window (default 30 days,
+`JAMGATE_COMPACT_GRACE_DAYS`); it runs opportunistically on every save (no scheduler) and
+is also exposed as `FileStore.compact()`. **Why:** RULES §2.5/§4 and the forbidden list
+require volatile state to expire, but hard-deleting on expiry is destructive and loses
+audit trail; soft-expire + delayed compaction retires stale entries by themselves while
+staying recoverable. Untyped memories get no expiry — we don't guess a lifespan we can't
+justify. Extends D-008.
+
+### D-022 — Concurrency safety: store lock + re-read-before-write
+Two MCP server processes can point at the same file (Claude Code and Cursor both on
+`~/.jamgate/memory.json`). Every read-modify-write now runs under an advisory lock file
+(`<store>.lock`, created with `O_CREAT|O_EXCL`) and re-reads the store fresh inside the
+lock, so concurrent writers serialize and no committed write is lost. Stale locks (holder
+crashed) are detected by age and stolen. **Why:** without this, two writers read the same
+base, both write, last `rename` wins → silent lost update; unacceptable for a trust
+project. **Honest limits (documented in `lock.ts`):** correct for processes on one host
+sharing a real local filesystem; not safe over NFS/SMB; stale-stealing has a small
+inherent race; on lock-acquire timeout it proceeds best-effort rather than fail the
+user's save. Sufficient for the local-first MVP (D-010); a hosted backend (D-019) would
+use DB transactions instead.
+
+### D-023 — On-disk schema versioning with automatic migration
+The store file is now a versioned envelope `{ schemaVersion, memories }` instead of a
+bare `Memory[]`. On read, any older shape is migrated in memory (the legacy unversioned
+array → current version, backfilling `expiresAt` from type), and the upgrade is persisted
+on the next write. Unrecognizable/empty input degrades to an empty store rather than
+throwing. **Why:** existing users' files must keep working as the shape evolves, and a
+first-class version marker makes every future migration a small, explicit, testable step
+instead of a guess. Phase 2.

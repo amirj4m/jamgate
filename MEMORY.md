@@ -54,6 +54,27 @@ These files are plain text. The portability mechanism is **git**: commit them, p
 then `git clone` on Linux and everything (rules + state) comes with it. On Linux,
 `ln -s AGENTS.md CLAUDE.md` so one file serves every agent.
 
+## Update — 2026-07-17 (Phase 2: robustness)
+Phase 2 goal met: **user data can't be corrupted, and stale memory retires itself.**
+Four items, all covered by tests, CI green on Node 20.x/22.x:
+- **Atomic, durable writes (D-020):** `FileStore.writeAll` writes a temp file in the
+  same dir, `fsync`s it, then `rename`s over the target. An interrupted write can't tear
+  the store. New module seam `persist()` lets a test simulate a crash mid-write.
+- **Type-based TTL / expiry + compaction (D-021):** new `src/store/ttl.ts`. `expiresAt`
+  derived from type at save time (identity/preference = never, project ~90d, state ~2d;
+  override via `JAMGATE_TTL_<TYPE>_DAYS`). Soft-expire hides expired from recall but keeps
+  them; `compact()` (also opportunistic on save) removes records expired past a 30-day
+  grace (`JAMGATE_COMPACT_GRACE_DAYS`). Untyped = never expires.
+- **Concurrency safety (D-022):** new `src/store/lock.ts`. Every read-modify-write runs
+  under a `<store>.lock` file (`O_CREAT|O_EXCL`, stale-lock stealing) + re-read-before-
+  write. Honest limits documented: same-host/local-FS only, not NFS-safe.
+- **Schema versioning (D-023):** new `src/store/schema.ts`. File is now
+  `{ schemaVersion, memories }`; legacy bare-array files migrate automatically (backfill
+  `expiresAt`) and persist on next write.
+- Tests: 28 → **44** (`node:test`), all green. Verified end-to-end over MCP too.
+- **Still open (unchanged):** thin classifier; auto-derive `subject`; embedding model;
+  multi-device sync (D-018).
+
 ## Update — 2026-06-19 (reframe session)
 - **Core purpose reframed (see D-016):** the product is a *shared cross-agent memory
   of the user* (who I am, my mood, and above all what I'm working on now), so agents
