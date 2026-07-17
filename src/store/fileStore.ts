@@ -13,6 +13,7 @@ import {
   type TtlPolicy,
 } from "./ttl.js";
 import { withFileLock } from "./lock.js";
+import { MIN_RELEVANCE, relevanceScore } from "../gate/relevance.js";
 
 /** How much we trust a memory by where it came from. A lower-trust source must not
  *  silently overwrite a higher-trust one — that's a contradiction to confirm, not an
@@ -193,11 +194,14 @@ export class FileStore implements MemoryStore {
     const memories = (await this.readAll()).filter(
       (m) => includeSuperseded || (m.status === "active" && !isExpired(m.expiresAt, now)),
     );
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     if (!q) return memories.slice(-limit).reverse();
+    // Fuzzy, deterministic, dependency-free relevance (Phase 3, item 2). Beats plain
+    // word-overlap on plurals/typos/word-boundary noise; synonyms are the embedding
+    // layer's job (item 4).
     return memories
-      .map((m) => ({ m, score: overlapScore(q, m.text.toLowerCase()) }))
-      .filter((x) => x.score > 0)
+      .map((m) => ({ m, score: relevanceScore(q, m.text) }))
+      .filter((x) => x.score >= MIN_RELEVANCE)
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
       .map((x) => x.m);
@@ -233,13 +237,4 @@ export class FileStore implements MemoryStore {
   private dropCompactable(memories: Memory[], nowMs: number): Memory[] {
     return memories.filter((m) => !isCompactable(m.expiresAt, nowMs, this.graceMs));
   }
-}
-
-/** Crude word-overlap relevance for the MVP. Embeddings come later (DECISIONS open item). */
-function overlapScore(query: string, text: string): number {
-  const qWords = new Set(query.split(/\W+/).filter(Boolean));
-  if (qWords.size === 0) return 0;
-  let hits = 0;
-  for (const w of qWords) if (text.includes(w)) hits++;
-  return hits / qWords.size;
 }
