@@ -149,6 +149,8 @@ export class FileStore implements MemoryStore {
       updatedAt: now,
       // Assign a freshness window by type (RULES §2.5, §4). Undefined = never expires.
       expiresAt: computeExpiresAt(input.type, now, this.ttl),
+      // Trusted provenance from the MCP handshake, not agent-claimed (D-024).
+      client: input.client,
     };
 
     let retired: Memory[] = [];

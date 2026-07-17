@@ -7,6 +7,15 @@ export type MemoryType = "identity" | "project" | "preference" | "state";
 export type MemorySource = "agent-inferred" | "user-confirmed" | "user-explicit";
 export type MemoryStatus = "active" | "superseded";
 
+/** Which MCP client wrote this memory, captured server-side from the `clientInfo` in the
+ *  MCP `initialize` handshake — NOT self-reported by the calling agent in the tool call.
+ *  Provenance we can trust: it says which app (Claude Code, Cursor, Cowork, …) and version
+ *  the write actually came from, for auditing a shared cross-agent memory (D-024). */
+export interface ClientInfo {
+  name: string;
+  version?: string;
+}
+
 export interface Memory {
   id: string;
   text: string;
@@ -26,6 +35,10 @@ export interface Memory {
   /** Set on the OLD memory when a newer one supersedes it. */
   supersededBy?: string;
   supersededAt?: string;
+  /** The MCP client that saved this memory, from the initialize handshake (D-024).
+   *  Additive and optional — absent on records written before Phase 3 or by a transport
+   *  that sent no clientInfo. Schema stays v2-compatible. */
+  client?: ClientInfo;
 }
 
 export interface SaveInput {
@@ -33,6 +46,8 @@ export interface SaveInput {
   type?: MemoryType;
   source: MemorySource;
   subject?: string;
+  /** The MCP client behind this save, stamped by the server from the handshake (D-024). */
+  client?: ClientInfo;
 }
 
 export interface SaveResult {
