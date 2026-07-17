@@ -14,6 +14,13 @@ import {
 } from "./ttl.js";
 import { withFileLock } from "./lock.js";
 import { MIN_RELEVANCE, relevanceScore } from "../gate/relevance.js";
+import type { Embedder } from "../embeddings/embedder.js";
+import {
+  DEFAULT_DUP_THRESHOLD,
+  DEFAULT_SEMANTIC_MIN,
+  blendRelevance,
+  cosineSimilarity,
+} from "../embeddings/vector.js";
 
 /** How much we trust a memory by where it came from. A lower-trust source must not
  *  silently overwrite a higher-trust one — that's a contradiction to confirm, not an
@@ -36,20 +43,44 @@ const DEFAULT_PATH = join(homedir(), ".jamgate", "memory.json");
  *  - records expire by type and are compacted once long-dead,
  *  - concurrent writers on one host are serialized by a lock file,
  *  - the file carries a schemaVersion and old formats migrate automatically.
+ *
+ * Phase 3 (D-026): an OPTIONAL embedder can be injected. When present, saves carry a local
+ * semantic embedding, recall blends semantic similarity with the fuzzy lexical score, and a
+ * near-duplicate is flagged as "possible_duplicate". When absent, everything falls back to
+ * fuzzy-only recall — the base install needs no ML runtime, and CI runs this path.
  */
 export class FileStore implements MemoryStore {
   private path: string;
   private lockPath: string;
   private ttl: TtlPolicy;
   private graceMs: number;
+  private embedder?: Embedder;
+  private dupThreshold: number;
 
-  constructor(path: string = process.env.JAMGATE_STORE ?? DEFAULT_PATH) {
+  constructor(
+    path: string = process.env.JAMGATE_STORE ?? DEFAULT_PATH,
+    opts: { embedder?: Embedder; dupThreshold?: number } = {},
+  ) {
     this.path = path;
     this.lockPath = `${path}.lock`;
     // Read policy once at construction so a single store instance is internally
     // consistent; a fresh instance picks up any changed env overrides.
     this.ttl = resolveTtlPolicy();
     this.graceMs = resolveGraceMs();
+    this.embedder = opts.embedder;
+    this.dupThreshold = opts.dupThreshold ?? DEFAULT_DUP_THRESHOLD;
+  }
+
+  /** Best-effort embedding: returns the vector, or undefined if no embedder is configured
+   *  or the embedder fails (recall/near-dup then degrade to fuzzy for this call). */
+  private async embed(text: string): Promise<number[] | undefined> {
+    if (!this.embedder) return undefined;
+    try {
+      return await this.embedder.embed(text);
+    } catch (err) {
+      console.error("jamgate: embedding failed, using fuzzy recall for this op:", err);
+      return undefined;
+    }
   }
 
   /** Load the store, migrating any older on-disk format to the current schema in memory
@@ -138,6 +169,10 @@ export class FileStore implements MemoryStore {
     );
     if (existing) return { action: "duplicate", memory: existing };
 
+    // Compute the semantic embedding once (best-effort). Stored on the record and reused
+    // for near-duplicate detection below. Undefined when no embedder is configured.
+    const embedding = await this.embed(input.text.trim());
+
     const now = new Date().toISOString();
     const memory: Memory = {
       id: randomUUID(),
@@ -152,6 +187,8 @@ export class FileStore implements MemoryStore {
       expiresAt: computeExpiresAt(input.type, now, this.ttl),
       // Trusted provenance from the MCP handshake, not agent-claimed (D-024).
       client: input.client,
+      // Local semantic vector (D-026); absent when embeddings are unavailable.
+      embedding,
     };
 
     let retired: Memory[] = [];
@@ -173,6 +210,16 @@ export class FileStore implements MemoryStore {
           old.supersededAt = now;
           old.updatedAt = now;
         }
+      }
+    } else if (embedding) {
+      // No subject to drive supersession, and this isn't an exact duplicate — check whether
+      // it is a SEMANTIC near-duplicate of something already on file (D-026). If so, don't
+      // store it; hand the existing record back so the agent decides (mirrors "conflict",
+      // never a silent drop). A subject-bearing save intentionally skips this: supplying a
+      // subject signals intent to update, handled by supersession above.
+      const near = this.findNearDuplicates(embedding, memories);
+      if (near.length > 0) {
+        return { action: "possible_duplicate", memory, possibleDuplicates: near };
       }
     }
 
@@ -196,12 +243,26 @@ export class FileStore implements MemoryStore {
     );
     const q = query.trim();
     if (!q) return memories.slice(-limit).reverse();
-    // Fuzzy, deterministic, dependency-free relevance (Phase 3, item 2). Beats plain
-    // word-overlap on plurals/typos/word-boundary noise; synonyms are the embedding
-    // layer's job (item 4).
-    return memories
-      .map((m) => ({ m, score: relevanceScore(q, m.text) }))
-      .filter((x) => x.score >= MIN_RELEVANCE)
+
+    // Fuzzy, deterministic lexical relevance (Phase 3, item 2). Always computed. Beats
+    // plain word-overlap on plurals/typos/word-boundary noise.
+    // When an embedder is available (D-026), also compute semantic similarity and blend it
+    // in — this is what earns synonym reach ("automobile" recalling a "car" memory) that
+    // the lexical scorer structurally cannot. A memory qualifies for recall if it is
+    // lexically relevant OR strongly semantically similar; results rank by the blended score.
+    const qVec = await this.embed(q);
+
+    const scored = memories.map((m) => {
+      const lexical = relevanceScore(q, m.text);
+      const semantic =
+        qVec && Array.isArray(m.embedding) ? cosineSimilarity(qVec, m.embedding) : 0;
+      const qualifies = lexical >= MIN_RELEVANCE || semantic >= DEFAULT_SEMANTIC_MIN;
+      const score = qVec ? blendRelevance(lexical, semantic) : lexical;
+      return { m, score, qualifies };
+    });
+
+    return scored
+      .filter((x) => x.qualifies)
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
       .map((x) => x.m);
@@ -236,5 +297,19 @@ export class FileStore implements MemoryStore {
 
   private dropCompactable(memories: Memory[], nowMs: number): Memory[] {
     return memories.filter((m) => !isCompactable(m.expiresAt, nowMs, this.graceMs));
+  }
+
+  /** Active memories whose embedding is at/above the near-duplicate threshold to `vec`,
+   *  most similar first. Records without an embedding (older/pre-embedding saves) are
+   *  simply skipped — they can't be compared, and we never guess a near-match (D-026). */
+  private findNearDuplicates(
+    vec: number[],
+    memories: Memory[],
+  ): Array<{ memory: Memory; similarity: number }> {
+    return memories
+      .filter((m) => m.status === "active" && Array.isArray(m.embedding))
+      .map((m) => ({ memory: m, similarity: cosineSimilarity(vec, m.embedding as number[]) }))
+      .filter((x) => x.similarity >= this.dupThreshold)
+      .sort((a, b) => b.similarity - a.similarity);
   }
 }

@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { pathToFileURL } from "node:url";
 import { FileStore } from "./store/fileStore.js";
+import { loadTransformersEmbedder, resolveDupThreshold } from "./embeddings/embedder.js";
 import type { ClientInfo, MemoryStore } from "./store/types.js";
 import { prefilter } from "./gate/prefilter.js";
 import {
@@ -160,6 +161,15 @@ export function createServer(
           `memory already exists: ${conflicts}. The new fact "${result.memory.text}" came ` +
           `from a less-trusted source (${result.memory.source}). Confirm with the user; to ` +
           `apply it, re-save with source "user-confirmed" or "user-explicit".`;
+      } else if (result.action === "possible_duplicate") {
+        const near = (result.possibleDuplicates ?? [])
+          .map((d) => `"${d.memory.text}" [id ${d.memory.id}] (~${d.similarity.toFixed(2)})`)
+          .join(", ");
+        msg =
+          `Not saved — "${result.memory.text}" looks like a semantic duplicate of an ` +
+          `existing memory: ${near}. If it is genuinely the same fact, nothing to do. If it ` +
+          `is a distinct fact or an update, re-save with a \`subject\` so the gate treats it ` +
+          `as its own memory (or a time-aware update of that subject).`;
       } else {
         msg = `Saved: "${result.memory.text}" [id ${result.memory.id}]`;
       }
@@ -187,8 +197,18 @@ export function createServer(
 }
 
 async function main() {
+  // Optional local embeddings (D-026): try to load the model; null → fuzzy recall only.
+  // Loading is lazy and best-effort so the base install and offline/CI runs work unchanged.
+  const embedder = await loadTransformersEmbedder();
+  if (embedder) console.error(`jamgate: semantic embeddings active (${embedder.id})`);
+  else console.error("jamgate: running on fuzzy recall (no embedding model loaded)");
+
   // Depend on the adapter contract, not a concrete backend (D-019).
-  const server = createServer(new FileStore());
+  const store = new FileStore(undefined, {
+    embedder: embedder ?? undefined,
+    dupThreshold: resolveDupThreshold(),
+  });
+  const server = createServer(store);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // stdout is the MCP channel; logs must go to stderr.

@@ -39,6 +39,11 @@ export interface Memory {
    *  Additive and optional — absent on records written before Phase 3 or by a transport
    *  that sent no clientInfo. Schema stays v2-compatible. */
   client?: ClientInfo;
+  /** Optional local semantic embedding of `text` (Phase 3, item 4; D-026). Present only
+   *  when the optional embedding backend was available at save time — records written
+   *  without it (or before Phase 3) simply have none and fall back to fuzzy recall.
+   *  Additive/optional → schema stays v2-compatible. */
+  embedding?: number[];
 }
 
 export interface SaveInput {
@@ -52,17 +57,24 @@ export interface SaveInput {
 
 export interface SaveResult {
   /** created   = new active memory
-   *  duplicate = already known
+   *  duplicate = already known (exact, normalized-text match)
    *  superseded = newer fact about the same subject won by recency, old retired (D-015)
    *  conflict  = same subject but the new fact is LESS trusted than the existing one,
    *              so it is NOT stored — the gate flags it for confirmation (RULES §2.3,
-   *              §5.4: genuine contradiction → ask, don't silently overwrite). */
-  action: "created" | "duplicate" | "superseded" | "conflict";
+   *              §5.4: genuine contradiction → ask, don't silently overwrite).
+   *  possible_duplicate = semantically near-identical to an existing memory (embedding
+   *              similarity above threshold) but NOT an exact match — the gate does NOT
+   *              store it and hands the existing record back to the agent to decide,
+   *              mirroring the conflict pattern (never silently dropped; D-026). */
+  action: "created" | "duplicate" | "superseded" | "conflict" | "possible_duplicate";
   memory: Memory;
   /** The memories retired by this save (only on action "superseded"). */
   retired?: Memory[];
   /** The existing memories the new one conflicts with (only on action "conflict"). */
   conflictsWith?: Memory[];
+  /** The existing near-duplicate(s) (only on action "possible_duplicate"), most similar
+   *  first, each annotated with the cosine similarity that triggered the flag. */
+  possibleDuplicates?: Array<{ memory: Memory; similarity: number }>;
 }
 
 /**
