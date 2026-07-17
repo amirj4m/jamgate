@@ -19,6 +19,10 @@ export interface Memory {
   status: MemoryStatus;
   createdAt: string; // ISO timestamp — every memory is a timestamped event (RULES §2.5, §4)
   updatedAt: string;
+  /** When this memory goes stale, derived from its `type` at save time (RULES §2.5, §4).
+   *  ISO timestamp; absent means it never expires (identity/preference, or untyped).
+   *  Expired records are hidden from recall (soft-expire) and eventually compacted. */
+  expiresAt?: string;
   /** Set on the OLD memory when a newer one supersedes it. */
   supersededBy?: string;
   supersededAt?: string;
