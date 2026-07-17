@@ -10,6 +10,7 @@ import { FileStore } from "./store/fileStore.js";
 import { loadTransformersEmbedder, resolveDupThreshold } from "./embeddings/embedder.js";
 import type { ClientInfo, MemoryStore } from "./store/types.js";
 import { prefilter } from "./gate/prefilter.js";
+import { deriveSubject } from "./gate/subject.js";
 import {
   appendGateLog,
   resolveGateLogConfig,
@@ -123,11 +124,14 @@ export function createServer(
         );
         return { content: [{ type: "text", text: `Rejected by gate: ${verdict.reason}.` }] };
       }
+      // Use the agent's subject when given; otherwise try to derive one conservatively
+      // (D-027). A derived subject only fires on a confident rule match, else stays unset.
+      const subject = args.subject ? String(args.subject) : deriveSubject(text);
       const result = await store.save({
         text,
         type: args.type as never,
         source: (args.source as never) ?? "agent-inferred",
-        subject: args.subject ? String(args.subject) : undefined,
+        subject,
         // Provenance from the MCP initialize handshake, not the agent's tool arguments (D-024).
         client,
       });
