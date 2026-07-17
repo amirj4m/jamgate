@@ -54,6 +54,42 @@ These files are plain text. The portability mechanism is **git**: commit them, p
 then `git clone` on Linux and everything (rules + state) comes with it. On Linux,
 `ln -s AGENTS.md CLAUDE.md` so one file serves every agent.
 
+## Update — 2026-07-17 (Phase 3: intelligence)
+Phase 3 goal met: **the gate moves from exact-match rules toward semantic understanding,
+without giving up local-first or the zero-config install.** Five items, each its own
+commit, all covered by tests, CI green on Node 20.x/22.x. Verified end-to-end over stdio
+MCP (real handshake).
+- **Client provenance (D-024):** each memory carries an optional `client` {name,version}
+  captured server-side from the MCP `initialize` handshake (`server.getClientVersion()`),
+  not spoofable via tool args. `index.ts` refactored into a testable
+  `createServer(store, gateLog?)` factory guarded from the stdio bootstrap.
+- **Fuzzy recall (D-028 in code; no D-entry — folded into item):** new
+  `src/gate/relevance.ts`. Deterministic, dependency-free: stemming-lite + stopword-aware
+  weighted token overlap + trigram Dice, with a fuzzy-token floor (0.4) and recall floor
+  (`MIN_RELEVANCE` 0.1). Replaced the old substring `overlapScore`. Beats plain overlap on
+  plurals/typos; synonym-blind by design.
+- **Gate decision log (D-025):** new `src/gate/log.ts`. Appends every decision (saved/
+  duplicate/superseded/conflict/possible_duplicate/rejected + reason/type/subject/source/
+  client/text) as JSONL to `~/.jamgate/gate.log`. STRICTLY LOCAL; size-capped w/ rotation
+  to `.1`; text truncated; `JAMGATE_GATE_LOG=off`. Best-effort, never breaks a save.
+  Training buffer for the future thin classifier (D-004).
+- **Optional local embeddings (D-026):** `src/embeddings/{vector,embedder}.ts`.
+  `@huggingface/transformers` (all-MiniLM-L6-v2, 384-dim) as an OPTIONAL peerDependency,
+  lazily dynamic-imported; missing package/model → loader returns null → fuzzy fallback.
+  Fully local inference. Injected `Embedder` into `FileStore` (DI). Recall blends semantic
+  cosine w/ fuzzy (semantic floor 0.5); semantic near-dup (cosine ≥ 0.88,
+  `JAMGATE_DUP_THRESHOLD`) → action `possible_duplicate` w/ existing record (never silent
+  drop). Subject-bearing saves skip near-dup (→ supersession). Vectors stored on records
+  (v2-compatible). Pure math + full wiring unit-tested in CI via hand-built vectors + a
+  deterministic mock — no model download.
+- **Auto-subject (D-027):** new `src/gate/subject.ts`. When agent omits `subject`, derive
+  one via keyword map + possessive/copula extractor. Conservative: confident match only,
+  else unset. Lives in gate/server layer, so the store stays mechanical.
+- Tests: 44 → **89** (`node:test`), all green. Schema still v2 (all new fields additive/
+  optional). `npm ci`/lockfile synced for the optional peer dep.
+- **Still open:** the thin classifier itself (only its logging shipped); embedding-quality
+  tuning; multi-device sync (D-018). Out of scope this phase: npm publish, HTTP transport.
+
 ## Update — 2026-07-17 (Phase 2: robustness)
 Phase 2 goal met: **user data can't be corrupted, and stale memory retires itself.**
 Four items, all covered by tests, CI green on Node 20.x/22.x:
