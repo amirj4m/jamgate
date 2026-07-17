@@ -38,7 +38,8 @@ describe("client provenance stamping (D-024)", () => {
 
   it("captures clientInfo from the MCP initialize handshake, not the tool args", async () => {
     const { store, cleanup } = await tempStore();
-    const server = createServer(store);
+    // Disable the gate log so the test never touches the real ~/.jamgate directory.
+    const server = createServer(store, { path: null, maxBytes: 0, maxTextChars: 0 });
     const client = new Client({ name: "claude-code", version: "9.9.9" }, { capabilities: {} });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     try {

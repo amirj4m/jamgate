@@ -9,13 +9,22 @@ import { pathToFileURL } from "node:url";
 import { FileStore } from "./store/fileStore.js";
 import type { ClientInfo, MemoryStore } from "./store/types.js";
 import { prefilter } from "./gate/prefilter.js";
+import {
+  appendGateLog,
+  resolveGateLogConfig,
+  type GateDecision,
+  type GateLogConfig,
+} from "./gate/log.js";
 
 /**
  * Build the Jamgate MCP server around a given store. Factored out of the stdio bootstrap
  * so tests can drive the real handlers over an in-memory transport (e.g. to prove that
  * client provenance is captured from the handshake, D-024) without spawning a process.
  */
-export function createServer(store: MemoryStore): Server {
+export function createServer(
+  store: MemoryStore,
+  gateLog: GateLogConfig = resolveGateLogConfig(),
+): Server {
   const server = new Server(
     { name: "jamgate", version: "0.0.1" },
     { capabilities: { tools: {} } },
@@ -95,8 +104,22 @@ export function createServer(store: MemoryStore): Server {
 
     if (name === "save_memory") {
       const text = String(args.text ?? "");
+      const client = clientInfoFromHandshake();
       const verdict = prefilter(text);
       if (!verdict.ok) {
+        // Record the rejection too — the classifier learns from what the gate turns away.
+        await appendGateLog(
+          {
+            decision: "rejected",
+            reason: verdict.reason,
+            type: args.type ? String(args.type) : undefined,
+            subject: args.subject ? String(args.subject) : undefined,
+            source: args.source ? String(args.source) : undefined,
+            client: client?.name,
+            text,
+          },
+          gateLog,
+        );
         return { content: [{ type: "text", text: `Rejected by gate: ${verdict.reason}.` }] };
       }
       const result = await store.save({
@@ -105,8 +128,21 @@ export function createServer(store: MemoryStore): Server {
         source: (args.source as never) ?? "agent-inferred",
         subject: args.subject ? String(args.subject) : undefined,
         // Provenance from the MCP initialize handshake, not the agent's tool arguments (D-024).
-        client: clientInfoFromHandshake(),
+        client,
       });
+      // Log the gate's decision to the local-only training buffer (D-025).
+      const decision: GateDecision = result.action === "created" ? "saved" : result.action;
+      await appendGateLog(
+        {
+          decision,
+          type: result.memory.type,
+          subject: result.memory.subject,
+          source: result.memory.source,
+          client: result.memory.client?.name,
+          text: result.memory.text,
+        },
+        gateLog,
+      );
       let msg: string;
       if (result.action === "duplicate") {
         msg = `Already known (no duplicate added): "${result.memory.text}" [id ${result.memory.id}]`;
