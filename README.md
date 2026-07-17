@@ -72,14 +72,45 @@ Restart the agent. It now has three tools:
 
 - **`save_memory`** — store a durable fact. The gate rejects junk, drops exact
   duplicates, and supersedes outdated facts by recency (pass a `subject` like
-  `operating-system` so a newer fact retires the older one). A less-trusted source
-  (e.g. an agent's guess) can never silently overwrite a more-trusted fact (something
-  you said explicitly) — the gate flags the conflict and asks for confirmation instead.
+  `operating-system` so a newer fact retires the older one — or let the gate derive one
+  for you when you omit it). A less-trusted source (e.g. an agent's guess) can never
+  silently overwrite a more-trusted fact (something you said explicitly) — the gate flags
+  the conflict and asks for confirmation instead. With the optional embedding layer on, a
+  save that means the same thing as an existing memory comes back as a `possible_duplicate`
+  for you to confirm rather than piling up.
 - **`recall_memory`** — fetch what's known, relevant to a query (active facts only).
 - **`forget_memory`** — delete a memory by id.
 
 Your memory lives in `~/.jamgate/memory.json` (override with the `JAMGATE_STORE`
 environment variable). Same machine, every agent → one shared memory.
+
+### Optional: local semantic search
+
+By default recall is **fuzzy lexical** matching (stemming, typo-tolerance, trigrams) —
+fast, deterministic, and dependency-free, but blind to synonyms. To also match on
+*meaning* (so "automobile" recalls a memory about your "car"), install the optional
+embedding backend:
+
+```bash
+npm install @huggingface/transformers
+```
+
+On first use it downloads a small sentence-embedding model (all-MiniLM-L6-v2, ~23 MB,
+quantized) and runs it **entirely on your machine — no text is ever sent to any cloud
+AI.** With it enabled, recall blends semantic similarity into the ranking, and a save
+that is semantically near-identical to an existing memory comes back as a
+`possible_duplicate` (with the existing record) for you to confirm rather than silently
+piling up. If the package isn't installed, Jamgate runs on fuzzy recall — nothing
+breaks. Turn it off explicitly with `JAMGATE_EMBEDDINGS=off`; tune the near-duplicate
+sensitivity with `JAMGATE_DUP_THRESHOLD` (0–1, default 0.88).
+
+### Local decision log
+
+Every gate decision (saved / duplicate / superseded / conflict / possible_duplicate /
+rejected, with its reason) is appended to `~/.jamgate/gate.log` — a **strictly local**
+JSONL file that never leaves your machine. It exists to collect real usage data for a
+future quality classifier. It is size-capped and rotates automatically; disable it with
+`JAMGATE_GATE_LOG=off`.
 
 ## Status
 
@@ -103,8 +134,23 @@ retires itself:
 - **Schema versioning** — the file carries a `schemaVersion` and older formats migrate
   automatically, so existing memory files keep working across upgrades.
 
+**Phase 3 (intelligence) is done** — the gate moves from exact-match rules toward
+semantic understanding, without giving up local-first or the zero-config install:
+
+- **Trusted client provenance** — each memory records which MCP client (Claude Code,
+  Cursor, …) wrote it, captured from the connection handshake so an agent can't spoof it.
+- **Fuzzy recall** — deterministic, dependency-free relevance (stemming-lite, typo
+  tolerance, trigram similarity) that beats plain word-overlap on plurals and typos.
+- **Optional local embeddings** — an opt-in, fully-local semantic layer (all-MiniLM-L6-v2)
+  that adds synonym-aware recall and semantic near-duplicate detection, degrading
+  gracefully to fuzzy recall when the model isn't installed.
+- **Auto-subject** — when the agent omits a `subject`, the gate conservatively derives one
+  from the text so time-aware supersession still works.
+- **Local decision log** — a strictly local training buffer of gate decisions for a future
+  quality classifier.
+
 Verified end-to-end over the MCP protocol and covered by an automated test suite. Next:
-a thin classifier for ambiguous cases, deriving `subject` automatically, and
+the thin classifier for ambiguous cases (trained on the local decision log) and
 multi-device sync (see `DECISIONS.md`). **Goal: impact, not profit — open-source (MIT),
 built in the open.**
 

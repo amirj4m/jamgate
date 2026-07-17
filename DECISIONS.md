@@ -184,3 +184,68 @@ on the next write. Unrecognizable/empty input degrades to an empty store rather 
 throwing. **Why:** existing users' files must keep working as the shape evolves, and a
 first-class version marker makes every future migration a small, explicit, testable step
 instead of a guess. Phase 2.
+
+---
+
+## Phase 3 — Intelligence (from exact-match rules toward semantic understanding, still local-first)
+
+### D-024 — Trusted client provenance from the MCP handshake
+Each saved memory carries an optional `client` field ({name, version}) captured **server-
+side** from the `clientInfo` in the MCP `initialize` handshake (`server.getClientVersion()`),
+NOT from the tool arguments. **Why:** in a shared cross-agent memory, knowing which app
+(Claude Code, Cursor, Cowork, …) actually wrote a fact is real audit value — but only if it
+can't be spoofed. Taking it from the handshake makes it provenance the calling agent cannot
+forge through a tool call. The field is additive/optional, so the schema stays v2-compatible
+(absent on pre-Phase-3 records) and no migration is needed. Required a small refactor of
+`index.ts` into a testable `createServer(store)` factory so the handshake path is driven over
+an in-memory transport in tests. Phase 3.
+
+### D-025 — Local-only gate decision log (training buffer for the thin classifier)
+Every gate decision (saved / duplicate / superseded / conflict / possible_duplicate /
+rejected, each with reason, type, subject, source, client, and the memory text) is appended
+as one JSON line to a local `~/.jamgate/gate.log`. **Why:** D-004 plans a thin "is this worth
+keeping?" classifier for ambiguous cases; training it well needs *real* labelled data from
+actual usage, not guesses. This log collects exactly that. **STRICTLY LOCAL** — it never
+leaves the machine, same promise as the store (D-010, and RULES: never send data to any cloud
+AI). It is size-capped with single-file rotation (`<path>.1`) so it can't grow without bound,
+truncates logged text to keep lines small (so appends stay atomic on POSIX), and is
+disable-able (`JAMGATE_GATE_LOG=off`). Logging is best-effort: a log-write failure must never
+break or fail a user's save. Phase 3.
+
+### D-026 — Optional local embeddings (semantic recall + near-duplicate detection)
+Integrate `@huggingface/transformers` (Transformers.js) with all-MiniLM-L6-v2 (384-dim) as an
+**optional enhancement**, not a base dependency. **Structure:** it is an optional
+peerDependency, lazily dynamic-imported; if the package or model is absent the loader returns
+null (never throws) and the gate degrades to fuzzy lexical recall (D-028's fuzzy layer). The
+base install stays zero-heavy-deps and works fully offline; **CI runs the fuzzy path** (no
+model download). Inference is **fully local** — no text ever leaves the machine (RULES: never
+send data to any cloud AI). **Two uses when present:** (a) recall blends semantic cosine
+similarity with the fuzzy score, earning synonym reach ("automobile" recalls a "car" memory)
+that lexical scoring structurally cannot, with a semantic floor so noise can't flood results;
+(b) a semantic near-duplicate (cosine above threshold, default 0.88, `JAMGATE_DUP_THRESHOLD`)
+that is NOT an exact match returns action `possible_duplicate` with the existing record for the
+agent to decide — mirrors the conflict pattern (D-015's guard), **never a silent drop**. A
+subject-bearing save intentionally skips near-dup and takes the time-aware supersession path
+(supplying a subject signals intent to update). Vectors are stored alongside records in the
+JSON (brute-force cosine is fine at this scale); the field is additive/optional so the schema
+stays v2-compatible. The store depends only on a small injected `Embedder` interface, so the
+pure math (cosine/blend/threshold) and the full semantic wiring are unit-tested in CI with
+hand-built vectors and a deterministic mock — no network. **Honest limits:** all-MiniLM is
+small; it handles paraphrase and common synonymy well but is weaker on domain jargon and
+negation, the near-dup threshold is a heuristic (a numeric-only change like "salary is 100k" →
+"120k" can read as a near-dup — hence advisory, returned to the agent, not dropped), and
+records written before an embedder was available simply have no vector and fall back to fuzzy.
+Phase 3.
+
+### D-027 — Conservative automatic subject derivation
+When the agent omits `subject`, derive a best-effort one from the text with deterministic,
+ML-free rules: a curated keyword map for common unambiguous subjects (location,
+operating-system, email, timezone, name, programming-language, current-project) plus a
+possessive/copula noun-phrase extractor ("my favorite color is blue" → "favorite-color").
+**Why:** `subject` drives time-aware supersession (D-015) but agents frequently omit it,
+leaving memories un-supersedable and letting stale facts pile up. **Deliberately
+conservative:** a *wrong* subject would wrongly retire an unrelated memory, so it only assigns
+on a confident rule match and otherwise leaves the subject unset — a missing subject is safe,
+an invented one is not. Derivation lives in the gate/server layer, keeping the store purely
+mechanical. Later, the embedding layer (D-026) or the thin classifier (D-004) can improve this
+with semantic subject clustering. Phase 3.
