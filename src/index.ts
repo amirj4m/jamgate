@@ -28,7 +28,7 @@ export function createServer(
   gateLog: GateLogConfig = resolveGateLogConfig(),
 ): Server {
   const server = new Server(
-    { name: "jamgate", version: "0.0.1" },
+    { name: "jamgate", version: "0.1.0" },
     { capabilities: { tools: {} } },
   );
 

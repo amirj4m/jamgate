@@ -1,21 +1,46 @@
 {
   "name": "jamgate",
-  "version": "0.0.1",
-  "description": "A neutral, cross-agent memory quality gate, delivered as an MCP server.",
+  "version": "0.1.0",
+  "mcpName": "io.github.amirj4m/jamgate",
+  "description": "A neutral, cross-agent memory quality gate for AI agents, delivered as an MCP server — a gate, not a store.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "memory",
+    "ai-agents",
+    "quality-gate",
+    "claude",
+    "cursor",
+    "local-first",
+    "embeddings",
+    "llm"
+  ],
   "license": "MIT",
+  "author": "jam",
   "type": "module",
+  "homepage": "https://github.com/amirj4m/jamgate#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amirj4m/jamgate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/amirj4m/jamgate/issues"
+  },
   "bin": {
     "jamgate": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
     "pretest": "tsc -p tsconfig.test.json",
-    "test": "node --test dist-test/test/*.test.js"
+    "test": "node --test dist-test/test/*.test.js",
+    "prepublishOnly": "npm run build"
   },
   "engines": {
     "node": ">=20"
