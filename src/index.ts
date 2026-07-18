@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { FileStore } from "./store/fileStore.js";
 import { loadTransformersEmbedder, resolveDupThreshold } from "./embeddings/embedder.js";
 import { parseCliOptions, startHttpServer } from "./http.js";
+import { setupCommand, statusCommand } from "./setup/cli.js";
 import type { ClientInfo, MemoryStore } from "./store/types.js";
 import { prefilter } from "./gate/prefilter.js";
 import { deriveSubject } from "./gate/subject.js";
@@ -217,7 +218,20 @@ async function buildStore(): Promise<FileStore> {
 }
 
 async function main() {
-  const opts = parseCliOptions(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+
+  // Install-helper subcommands run before any store/server bootstrap — they only touch client
+  // config files, never the memory store or a transport (the One-Click Install phase, D-030).
+  if (argv[0] === "setup") {
+    process.exitCode = await setupCommand(argv.slice(1));
+    return;
+  }
+  if (argv[0] === "status") {
+    process.exitCode = await statusCommand();
+    return;
+  }
+
+  const opts = parseCliOptions(argv);
   const store = await buildStore();
 
   if (opts.http) {
