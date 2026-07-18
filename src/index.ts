@@ -6,6 +6,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { pathToFileURL } from "node:url";
+import { VERSION } from "./version.js";
 import { FileStore } from "./store/fileStore.js";
 import { loadTransformersEmbedder, resolveDupThreshold } from "./embeddings/embedder.js";
 import { parseCliOptions, startHttpServer } from "./http.js";
@@ -30,7 +31,7 @@ export function createServer(
   gateLog: GateLogConfig = resolveGateLogConfig(),
 ): Server {
   const server = new Server(
-    { name: "jamgate", version: "0.3.0" },
+    { name: "jamgate", version: VERSION },
     { capabilities: { tools: {} } },
   );
 

@@ -8,6 +8,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { MemoryStore } from "./store/types.js";
+import { VERSION } from "./version.js";
 import { createServer } from "./index.js";
 import { resolveGateLogConfig, type GateLogConfig } from "./gate/log.js";
 
@@ -31,6 +32,7 @@ import { resolveGateLogConfig, type GateLogConfig } from "./gate/log.js";
 const DEFAULT_PORT = 8420;
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_MCP_PATH = "/mcp";
+const HEALTH_PATH = "/healthz";
 
 /** How to run: stdio (default) or the opt-in HTTP transport. Parsed from argv + env so the
  *  bootstrap in index.ts stays a thin switch and the parsing is unit-testable. */
@@ -42,8 +44,9 @@ export interface CliOptions {
 /**
  * Decide the run mode from CLI args and environment. HTTP mode is opt-in via the `--http`
  * flag or a truthy `JAMGATE_HTTP` env var; stdio is the default when neither is set. The
- * port comes from `--port <n>`, else `JAMGATE_PORT`, else {@link DEFAULT_PORT}. An invalid
- * port falls back to the default rather than crashing the server on a typo.
+ * port comes from `--port <n>`, else `JAMGATE_PORT`, else the platform's `PORT` (PaaS hosts
+ * such as Railway and Render inject it), else {@link DEFAULT_PORT}. An invalid port falls
+ * back to the default rather than crashing the server on a typo.
  */
 export function parseCliOptions(
   argv: readonly string[],
@@ -57,6 +60,10 @@ export function parseCliOptions(
     port = Number(argv[flagIndex + 1]);
   } else if (env.JAMGATE_PORT) {
     port = Number(env.JAMGATE_PORT);
+  } else if (env.PORT) {
+    // Deploy platforms (Railway, Render, Heroku, …) assign the listen port via $PORT and
+    // expect the app to honor it. JAMGATE_PORT still wins so an explicit override is possible.
+    port = Number(env.PORT);
   }
   if (port === undefined || !Number.isInteger(port) || port < 0 || port > 65535) {
     port = DEFAULT_PORT;
@@ -190,6 +197,25 @@ async function handleRequest(
   res: ServerResponse,
   ctx: RequestContext,
 ): Promise<void> {
+  // 0. Health check — deliberately BEFORE the auth gate and outside the MCP endpoint. Deploy
+  //    platforms (Railway, Render, …) probe an unauthenticated URL to decide if the container
+  //    is live, so this must answer 200 without a token. It exposes only liveness + version —
+  //    never any memory, session, or config data (RULES §10: nothing leaks).
+  const reqPath = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`).pathname;
+  if (reqPath === HEALTH_PATH) {
+    if (req.method === "GET" || req.method === "HEAD") {
+      sendJson(res, 200, { status: "ok", version: VERSION });
+    } else {
+      res.setHeader("Allow", "GET, HEAD");
+      sendJson(res, 405, {
+        jsonrpc: "2.0",
+        error: { code: -32000, message: `Method ${req.method} not allowed` },
+        id: null,
+      });
+    }
+    return;
+  }
+
   // 1. Auth gate — before anything else, on every method. A missing/wrong token is a flat
   //    401; we never fall through to session handling for an unauthenticated request.
   if (!bearerTokenMatches(req.headers.authorization, ctx.token)) {
@@ -202,8 +228,8 @@ async function handleRequest(
     return;
   }
 
-  // 2. Only the MCP endpoint exists. Everything else is 404 (a bare health check on `/`
-  //    is intentionally not provided — the proxy fronts this and there's nothing to leak).
+  // 2. Past the auth gate, only the MCP endpoint exists (the unauthenticated `/healthz` was
+  //    already handled in step 0). Everything else is 404.
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   if (url.pathname !== ctx.path) {
     sendJson(res, 404, {

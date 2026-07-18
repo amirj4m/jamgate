@@ -10,6 +10,7 @@ import {
   type RunningHttpServer,
 } from "../src/http.js";
 import type { GateLogConfig } from "../src/gate/log.js";
+import { VERSION } from "../src/version.js";
 import { tempStore } from "./helpers.js";
 
 const TOKEN = "s3cret-token-for-tests";
@@ -79,10 +80,23 @@ describe("CLI option parsing (parseCliOptions)", () => {
     assert.equal(parseCliOptions([], { JAMGATE_PORT: "1234" }).port, 1234);
   });
 
+  it("honors the platform PORT env when no flag or JAMGATE_PORT is set", () => {
+    assert.equal(parseCliOptions([], { PORT: "3000" }).port, 3000);
+  });
+
+  it("prefers JAMGATE_PORT over the platform PORT", () => {
+    assert.equal(parseCliOptions([], { JAMGATE_PORT: "1234", PORT: "3000" }).port, 1234);
+  });
+
+  it("prefers --port over both JAMGATE_PORT and PORT", () => {
+    assert.equal(parseCliOptions(["--port", "9000"], { JAMGATE_PORT: "1234", PORT: "3000" }).port, 9000);
+  });
+
   it("falls back to the default port on an invalid value", () => {
     assert.equal(parseCliOptions(["--port", "not-a-number"], {}).port, 8420);
     assert.equal(parseCliOptions(["--port", "70000"], {}).port, 8420);
     assert.equal(parseCliOptions([], { JAMGATE_PORT: "-1" }).port, 8420);
+    assert.equal(parseCliOptions([], { PORT: "not-a-number" }).port, 8420);
   });
 });
 
@@ -156,6 +170,55 @@ describe("HTTP transport: auth gate (raw requests)", () => {
         headers: { Authorization: `Bearer ${TOKEN}` },
       });
       assert.equal(res.status, 404);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe("HTTP transport: health check (/healthz)", () => {
+  it("answers 200 with status + version and requires no auth", async () => {
+    const { running, cleanup } = await bootServer();
+    try {
+      const healthUrl = `http://${running.host}:${running.port}/healthz`;
+      const res = await fetch(healthUrl); // no Authorization header on purpose
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("content-type"), "application/json");
+      const body = await res.json();
+      assert.deepEqual(body, { status: "ok", version: VERSION });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("exposes no memory data — the body is only status + version", async () => {
+    const { url, running, store, cleanup } = await bootServer();
+    let client: Client | undefined;
+    try {
+      // Put a real memory in the store, then confirm the health payload can't leak it.
+      ({ client } = await connectClient(url, TOKEN));
+      await client.callTool({
+        name: "save_memory",
+        arguments: { text: "jam keeps a secret memory", source: "user-explicit" },
+      });
+      await store.recall("secret", 5); // sanity: it is really stored
+
+      const res = await fetch(`http://${running.host}:${running.port}/healthz`);
+      const raw = await res.text();
+      assert.doesNotMatch(raw, /secret/);
+      assert.deepEqual(JSON.parse(raw), { status: "ok", version: VERSION });
+    } finally {
+      if (client) await client.close();
+      await cleanup();
+    }
+  });
+
+  it("rejects a non-GET method on /healthz with 405", async () => {
+    const { running, cleanup } = await bootServer();
+    try {
+      const res = await fetch(`http://${running.host}:${running.port}/healthz`, { method: "POST" });
+      assert.equal(res.status, 405);
+      assert.match(res.headers.get("allow") ?? "", /GET/);
     } finally {
       await cleanup();
     }
