@@ -16,7 +16,13 @@ export interface LockOptions {
   timeoutMs?: number;
 }
 
-const DEFAULTS = { staleMs: 30_000, retryMs: 25, timeoutMs: 10_000 };
+// timeoutMs is aligned with staleMs on purpose: a waiter only gives up and proceeds
+// WITHOUT the lock once it has waited long enough that the holder's lock is itself stale
+// — and a stale lock is stolen (see the loop below) before the give-up branch is ever
+// reached. So under contention a live holder's write is never clobbered: a waiter either
+// acquires the lock or steals a provably-abandoned one. The give-up path survives only as
+// a last-resort liveness guard against pathological starvation.
+const DEFAULTS = { staleMs: 30_000, retryMs: 25, timeoutMs: 30_000 };
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -40,11 +46,12 @@ function sleep(ms: number): Promise<void> {
  * WHAT THIS DOES NOT GUARANTEE: it is not safe over NFS/SMB or other network
  * filesystems, whose `O_EXCL` semantics are unreliable. Stale-lock stealing has an
  * inherent small race: a holder stalled past `staleMs` could resume just as another
- * process steals its lock. And if acquisition times out we proceed WITHOUT the lock
- * (best-effort) rather than fail the user's save — re-read-before-write still bounds the
- * damage, but simultaneity is then possible. For the single-machine, local-disk MVP
- * (D-010) this is sufficient; a hosted backend (D-019) would rely on its database's own
- * transactions instead of a file lock.
+ * process steals its lock. Acquisition has a `timeoutMs` after which we proceed WITHOUT
+ * the lock rather than fail the user's save; because `timeoutMs` defaults to `staleMs`,
+ * that give-up only comes due once the current lock is old enough to be stolen as stale
+ * — which happens first — so a live holder's write is not clobbered under contention. For
+ * the single-machine, local-disk MVP (D-010) this is sufficient; a hosted backend (D-019)
+ * would rely on its database's own transactions instead of a file lock.
  */
 export async function withFileLock<T>(
   lockPath: string,
