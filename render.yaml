@@ -1,0 +1,29 @@
+# Render Blueprint — one-click deploy of a personal Jamgate instance.
+# https://render.com/docs/blueprint-spec
+#
+# Clicking the "Deploy to Render" button in the README reads this file, builds the image from
+# the repo's Dockerfile, generates a strong JAMGATE_TOKEN for you, and attaches a persistent
+# disk so your memory survives restarts. You pay Render directly for the instance; Jamgate hosts
+# nothing and never sees your data (see DECISIONS D-031).
+services:
+  - name: jamgate
+    type: web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # A disk requires a paid instance type; free instances can't persist data.
+    plan: starter
+    # Unauthenticated liveness probe — exposes only status + version, never memory (RULES §10).
+    healthCheckPath: /healthz
+    # Persistent memory store. JAMGATE_STORE=/data/memory.json is set in the Dockerfile, so this
+    # disk is exactly where the store file lives.
+    disk:
+      name: jamgate-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      # The bearer token that guards every request. generateValue makes Render mint a random
+      # 256-bit secret at deploy time, so a strong token exists without you inventing one. Read
+      # it afterwards under the service's Environment tab to connect your agents.
+      - key: JAMGATE_TOKEN
+        generateValue: true
