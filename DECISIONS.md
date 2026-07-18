@@ -283,3 +283,37 @@ soon as the user has agents on a phone and multiple machines, stdio (one local p
 can't be that shared brain — a single reachable endpoint can. Extends D-010/D-019 (local-first
 default; storage/transport behind clean seams) toward the hosted tier without taking on the D-019
 cloud-tenancy obligations. Phase 5.
+
+## Phase 6 — One-click install: reduce install friction to near-zero for every client
+
+### D-030 — `jamgate setup`/`status`: safe, idempotent auto-wiring across MCP clients
+Ship an install helper so a new user goes from zero to wired in one command:
+`npx jamgate setup` detects the MCP clients present on the machine (**Claude Code**,
+**Claude Desktop**, **Cursor**, **Windsurf**) and adds Jamgate's `mcpServers` entry to each.
+`jamgate status` reports where Jamgate is wired and where the store lives.
+**Safety is the whole point** — the command is the first thing a stranger runs, so it must never
+surprise them:
+- **Idempotent.** Outcome is decided from the current file state (`already-configured` /
+  `configured` / `updated`); a second run writes nothing.
+- **Never clobbers.** Only our own `mcpServers.jamgate` key is ever touched; every other server
+  and every other top-level field is preserved (parsed → merged → re-serialized, not string-patched).
+- **Backup-first.** Any existing config file is copied to `<file>.jamgate-backup` before a write.
+- **`--dry-run`** computes and prints every change without touching disk.
+- **`--remote <url> --token <t>`** writes HTTP-transport entries for the clients that speak
+  Streamable HTTP (Claude Code, Cursor); clients without a verified HTTP path (Claude Desktop's
+  connectors flow, Windsurf's SSE `serverUrl`) are **skipped with a reason** rather than mis-wired —
+  honesty over coverage.
+**Claude Code** prefers `claude mcp add --scope user` when the CLI is present (the blessed path,
+robust to schema drift), and falls back to a direct `~/.claude.json` merge otherwise; the stdio
+entry is written in Claude Code's own `{type,command,args,env}` shape so a CLI-added entry reads as
+already-configured on re-run. **Architecture:** a pure client registry + pure JSON merge (fully
+unit-tested against a fake home, never the real configs) under a thin IO runner and CLI, mirroring
+the D-029 split of `parseCliOptions` from the transport. **No new runtime dependencies** — the
+zero-dep philosophy (D-010) holds; the whole helper is Node stdlib.
+Complemented by two zero-CLI on-ramps: a **Cursor deeplink**
+(`cursor://anysphere.cursor-deeplink/mcp/install?name=jamgate&config=<base64 of {command,args}>`,
+payload verified to round-trip) as an "Add to Cursor" badge, and a **Claude Desktop `.mcpb`
+bundle** (MCPB manifest v0.3, built headlessly with `@anthropic-ai/mcpb`, ships as a GitHub release
+asset). The bundle omits the optional embeddings peer, so it behaves like a base install (fuzzy
+recall) — verified to boot on stdio and answer `initialize` + `tools/list` from its bundled deps.
+Phase 6.

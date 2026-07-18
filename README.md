@@ -9,9 +9,14 @@
 > agent reads from and writes to, kept honest at write time. Local-first, no cloud calls,
 > one dependency.
 
+One command wires Jamgate into every MCP client on your machine:
+
 ```bash
-claude mcp add jamgate -- npx jamgate
+npx jamgate setup
 ```
+
+[![Add to Cursor](https://img.shields.io/badge/Add%20to-Cursor-000?logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=jamgate&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyJqYW1nYXRlIl19)
+&nbsp;•&nbsp; one-click **Claude Desktop** bundle → [latest release](https://github.com/amirj4m/jamgate/releases/latest) (`jamgate.mcpb`)
 
 ## The problem: memory quality, not storage
 
@@ -76,15 +81,56 @@ remembered.
 Jamgate runs **locally** — your memory never leaves your machine. Requires Node.js 20+.
 No install step: `npx` fetches and runs it on demand.
 
-### Claude Code
+### Option A — `npx jamgate setup` (recommended)
+
+One command detects the MCP clients installed on your machine (Claude Code, Claude Desktop,
+Cursor, Windsurf) and wires Jamgate into each:
+
+```bash
+npx jamgate setup
+```
+
+It is **safe to run**: idempotent (running it twice changes nothing), it never touches any
+server entry but its own, and it backs up each config file to `<file>.jamgate-backup` before
+writing. Useful flags:
+
+```bash
+npx jamgate setup --dry-run                          # show what would change, write nothing
+npx jamgate setup --remote https://you/mcp --token … # wire HTTP transport (see Remote mode)
+npx jamgate status                                    # show which clients are wired + where the store lives
+```
+
+Restart your client(s) afterwards. On Claude Code, when the `claude` CLI is present, setup
+uses `claude mcp add` under the hood; otherwise it merges `~/.claude.json` directly.
+
+### Option B — per-client manual
+
+Prefer to wire it yourself? Each client is a small config change.
+
+**Claude Code:**
 
 ```bash
 claude mcp add jamgate -- npx jamgate
 ```
 
-### Claude Desktop
+**Claude Desktop** — one-click: download `jamgate.mcpb` from the
+[latest release](https://github.com/amirj4m/jamgate/releases/latest) and open it (Claude
+Desktop → Settings → Extensions), or add to `claude_desktop_config.json` (Settings →
+Developer → Edit Config):
 
-Add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
+```json
+{
+  "mcpServers": {
+    "jamgate": {
+      "command": "npx",
+      "args": ["jamgate"]
+    }
+  }
+}
+```
+
+**Cursor** — click the **Add to Cursor** badge at the top, or add to `~/.cursor/mcp.json`
+(or `.cursor/mcp.json` in a project):
 
 ```json
 {
@@ -97,20 +143,7 @@ Add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
 }
 ```
 
-### Cursor
-
-Add to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
-
-```json
-{
-  "mcpServers": {
-    "jamgate": {
-      "command": "npx",
-      "args": ["jamgate"]
-    }
-  }
-}
-```
+**Windsurf** — add the same `mcpServers` block to `~/.codeium/windsurf/mcp_config.json`.
 
 Restart the agent. It now has three tools:
 
@@ -341,9 +374,12 @@ for the full scope):
 - **Remote mode** *(optional)* — self-hosted Streamable HTTP transport with bearer-token
   auth, so one instance can serve all of your agents (phone, browser, laptop) from one
   shared memory. stdio stays the default.
+- **One-click install** — `npx jamgate setup` wires every detected client (Claude Code,
+  Claude Desktop, Cursor, Windsurf) in one idempotent, backup-first command, plus a Cursor
+  deeplink and a Claude Desktop `.mcpb` bundle.
 
 Verified end-to-end over the MCP protocol (both stdio and HTTP) and covered by an automated
-test suite (107 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
+test suite (131 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
 (trained on the local decision log) and multi-device sync (see [`DECISIONS.md`](./DECISIONS.md)).
 **Goal: impact, not profit — open-source (MIT), built in the open.**
 

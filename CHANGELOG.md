@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-18
+
+One-click install: go from zero to wired across every MCP client on your machine with a
+single command, plus zero-CLI on-ramps for Cursor and Claude Desktop. No new runtime
+dependencies — the helper is pure Node stdlib.
+
+### Added
+
+- **`jamgate setup`** — detects installed MCP clients (Claude Code, Claude Desktop, Cursor,
+  Windsurf) and wires Jamgate into each. Safe by construction: idempotent (a second run
+  changes nothing), never touches any server entry but its own, and backs up each config
+  file to `<file>.jamgate-backup` before writing. `--dry-run` previews every change without
+  writing; `--remote <url> --token <t>` writes HTTP-transport entries for clients that speak
+  Streamable HTTP (others are skipped with a reason). On Claude Code it uses `claude mcp add`
+  when the CLI is present, else merges `~/.claude.json` directly.
+- **`jamgate status`** — reports which clients are wired (and over which transport) and where
+  the memory store lives.
+- **Cursor deeplink** — an "Add to Cursor" badge in the README installs Jamgate in one click
+  via `cursor://anysphere.cursor-deeplink/mcp/install` (base64 payload verified to round-trip).
+- **Claude Desktop `.mcpb` bundle** — a reproducible builder (`scripts/build-mcpb.mjs`,
+  MCPB manifest v0.3, packed headlessly with `@anthropic-ai/mcpb`) produces `jamgate.mcpb`,
+  shipped as a GitHub release asset for one-click install. The bundle omits the optional
+  embeddings peer, so it behaves like a base install (fuzzy recall); verified to boot on
+  stdio and answer `initialize` + `tools/list` from its bundled dependencies.
+
+### Changed
+
+- README Quick start is now **Option A — `npx jamgate setup` (recommended)** / **Option B —
+  per-client manual** (the manual config blocks are kept for transparency).
+
+### Tests
+
+- +24 tests over the setup module (entry shapes, per-platform config paths, Cursor deeplink
+  round-trip, pure JSON merge including no-clobber/idempotency/malformed input, and the IO
+  runner against a temp home — configure, re-run, backup, dry-run, not-found, remote skip,
+  the claude-CLI path and its fallback, and status). 107 → 131 total.
+
 ## [0.2.0] - 2026-07-18
 
 Adds an **optional** self-hosted remote mode so one Jamgate instance can serve all of a
@@ -105,6 +142,7 @@ single shared memory clean at write time instead of letting it bloat with junk.
 - Verified end-to-end over the MCP protocol and covered by an automated test suite
   (89 tests) running on Node 20.x and 22.x in CI.
 
-[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/amirj4m/jamgate/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/amirj4m/jamgate/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/amirj4m/jamgate/releases/tag/v0.1.0
