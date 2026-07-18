@@ -122,7 +122,8 @@ Restart the agent. It now has three tools:
 - **`forget_memory`** — delete a memory by id.
 
 Your memory lives in `~/.jamgate/memory.json`. Same machine, every agent → one shared
-memory.
+memory. To share one memory across **different** machines and your phone, see
+[Remote mode](#remote-mode-self-hosted).
 
 ## Optional: local semantic search
 
@@ -153,6 +154,142 @@ All configuration is via environment variables; every one has a sensible default
 | `JAMGATE_DUP_THRESHOLD` | `0.88` | Semantic near-duplicate sensitivity (0–1); higher = stricter. |
 | `JAMGATE_GATE_LOG` | on | `off` disables the local decision log. |
 | `JAMGATE_TTL_<TYPE>_DAYS` | per type | Override the freshness window for a memory type, e.g. `JAMGATE_TTL_PROJECT_DAYS=180`. |
+| `JAMGATE_HTTP` | off | `1`/`true` enables [remote mode](#remote-mode-self-hosted) (same as the `--http` flag). |
+| `JAMGATE_PORT` | `8420` | Port for remote mode (same as `--port`). |
+| `JAMGATE_HOST` | `127.0.0.1` | Interface to bind in remote mode. Keep it on localhost behind a reverse proxy. |
+| `JAMGATE_TOKEN` | — | Bearer token required in remote mode. The server refuses to start without it. |
+
+## Remote mode (self-hosted)
+
+By default Jamgate runs **locally over stdio** — one process per agent, on your machine, no
+network. That's the right model for a single computer. But you are one person with agents in
+several places at once: the Claude app on your **phone**, claude.ai in a **browser**, Claude
+Code on a **laptop**. stdio can't be their shared brain — each would get its own local process
+and its own memory.
+
+**Remote mode** is the answer: run **one** Jamgate instance on a server you control, put it
+behind HTTPS, and point every agent at the same URL. Now they share **one** memory of you — save
+on your phone, recall on your laptop. It's the same gate and the same store, just reachable over
+the network. It stays **opt-in**; stdio remains the default and the local-first promise is
+unchanged. Whether it's your own memory or a whole team's, the rule is one instance per person
+(see [Honest limits](#honest-limits-read-this)).
+
+### Run it
+
+```bash
+# A strong token is REQUIRED — the server refuses to start without one.
+export JAMGATE_TOKEN=$(openssl rand -hex 32)
+jamgate --http                 # listens on 127.0.0.1:8420/mcp
+# or: jamgate --http --port 9000     (or JAMGATE_HTTP=1 JAMGATE_PORT=9000)
+```
+
+The MCP endpoint is `/mcp`. Every request must carry `Authorization: Bearer <token>`; anything
+else gets a `401`.
+
+### Security model
+
+- **Bearer token.** One shared secret in `JAMGATE_TOKEN` guards every request, compared in
+  constant time so it can't be recovered from response timing. Generate it with
+  `openssl rand -hex 32`, keep it out of shell history, and rotate it by restarting with a new
+  value.
+- **TLS is terminated by a reverse proxy, not by Jamgate.** Jamgate speaks plain HTTP and binds
+  to `127.0.0.1` by default, so it is never directly exposed. Put **caddy** or **nginx** in
+  front to terminate HTTPS and forward to it locally. A bearer token over plain HTTP on the open
+  internet is a leaked token — **always** run it behind TLS.
+- **Your server, your data.** The store is still a flat file on a disk you own. No Jamgate cloud,
+  no third party, no telemetry. "Self-hosted" means exactly that.
+
+### Deploy: systemd + Caddy
+
+A `systemd` unit to keep Jamgate running (fill in your user and a real token — ideally load the
+token from an `EnvironmentFile` with `600` permissions rather than inlining it):
+
+```ini
+# /etc/systemd/system/jamgate.service
+[Unit]
+Description=Jamgate MCP memory (remote mode)
+After=network.target
+
+[Service]
+# Load JAMGATE_TOKEN=... (and any JAMGATE_* overrides) from a root-only file:
+EnvironmentFile=/etc/jamgate.env
+Environment=JAMGATE_HTTP=1
+Environment=JAMGATE_PORT=8420
+Environment=JAMGATE_STORE=/var/lib/jamgate/memory.json
+ExecStart=/usr/bin/npx jamgate
+User=jamgate
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+echo "JAMGATE_TOKEN=$(openssl rand -hex 32)" | sudo tee /etc/jamgate.env >/dev/null
+sudo chmod 600 /etc/jamgate.env
+sudo systemctl enable --now jamgate
+```
+
+**Caddy** — automatic HTTPS, two lines of real config:
+
+```caddyfile
+memory.example.com {
+    reverse_proxy 127.0.0.1:8420
+}
+```
+
+**nginx** — equivalent, with TLS certs managed by certbot:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name memory.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/memory.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/memory.example.com/privkey.pem;
+
+    location /mcp {
+        proxy_pass         http://127.0.0.1:8420/mcp;
+        proxy_http_version 1.1;
+        proxy_set_header   Connection "";        # keep-alive for SSE streaming
+        proxy_buffering    off;                  # don't buffer the event stream
+        proxy_read_timeout 3600s;
+    }
+}
+```
+
+### Connect your agents
+
+Point every agent at `https://your-domain/mcp` with the token.
+
+**Claude app (iOS / Android / desktop) and claude.ai** — Settings → Connectors → *Add custom
+connector* → URL `https://your-domain/mcp`, and provide the bearer token when asked. Once
+connected, the same three tools (`save_memory`, `recall_memory`, `forget_memory`) are available
+from your phone and browser.
+
+**Claude Code** — add it as an HTTP MCP server:
+
+```bash
+claude mcp add --transport http jamgate https://your-domain/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+**Any MCP client** that speaks Streamable HTTP works the same way: URL `https://your-domain/mcp`,
+header `Authorization: Bearer <token>`.
+
+### Honest limits (read this)
+
+- **Whoever holds the token holds the memory.** There are no per-user accounts — the token *is*
+  the authentication. Treat it like a password: strong, secret, rotated on suspicion.
+- **One instance = one human.** Jamgate's memory is *of one person*, by design. There is no
+  multi-user tenancy, no per-identity isolation or access control. That's a deliberate scope
+  choice, not a missing feature — it keeps the security surface to a single secret and a single
+  store. If several people each want a memory, run one instance per person.
+- **Concurrency is single-process.** Multiple agents hitting one instance at once is safe (writes
+  are serialized by a lock and re-read before write). This holds for one Jamgate process on one
+  host; it is not a distributed multi-node store.
+- **No TLS in the box.** If you skip the reverse proxy, you're sending a bearer token in the
+  clear. Don't.
 
 ## How it compares
 
@@ -191,9 +328,9 @@ be local, free, and one command to install.
 
 ## Status
 
-Early but real, and now installable with one command. The MVP core, robustness, and
-intelligence layers all work today (see [`CHANGELOG.md`](./CHANGELOG.md) for the full
-0.1.0 scope):
+Early but real, and now installable with one command. The MVP core, robustness,
+intelligence, and optional remote layers all work today (see [`CHANGELOG.md`](./CHANGELOG.md)
+for the full scope):
 
 - **Gate core** — rule pre-filter, exact dedup, time-aware supersession, source-trust
   conflict guard, over a local flat-file store.
@@ -201,10 +338,13 @@ intelligence layers all work today (see [`CHANGELOG.md`](./CHANGELOG.md) for the
   automatic schema migration.
 - **Intelligence** — trusted client provenance, fuzzy recall, optional local embeddings
   with graceful fallback, auto-subject derivation, local decision log.
+- **Remote mode** *(optional)* — self-hosted Streamable HTTP transport with bearer-token
+  auth, so one instance can serve all of your agents (phone, browser, laptop) from one
+  shared memory. stdio stays the default.
 
-Verified end-to-end over the MCP protocol and covered by an automated test suite (89
-tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases (trained on the
-local decision log) and multi-device sync (see [`DECISIONS.md`](./DECISIONS.md)).
+Verified end-to-end over the MCP protocol (both stdio and HTTP) and covered by an automated
+test suite (107 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
+(trained on the local decision log) and multi-device sync (see [`DECISIONS.md`](./DECISIONS.md)).
 **Goal: impact, not profit — open-source (MIT), built in the open.**
 
 ## Development

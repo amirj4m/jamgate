@@ -249,3 +249,37 @@ on a confident rule match and otherwise leaves the subject unset — a missing s
 an invented one is not. Derivation lives in the gate/server layer, keeping the store purely
 mechanical. Later, the embedding layer (D-026) or the thin classifier (D-004) can improve this
 with semantic subject clustering. Phase 3.
+
+---
+
+## Phase 5 — Remote (optional): one self-hosted instance behind an endpoint, shared by all a person's agents
+
+### D-029 — Optional remote mode: Streamable HTTP + bearer token; one instance = one human
+Add an **opt-in** remote transport so a single self-hosted Jamgate instance can serve all of
+one person's MCP clients at once — the Claude phone app (custom connector), claude.ai, Claude
+Code on a laptop (`--transport http`), a ChatGPT MCP connector — sharing **one** memory. Enabled
+only by `jamgate --http [--port 8420]` (or `JAMGATE_HTTP=1` / `JAMGATE_PORT`); **stdio stays the
+default** and the local-first story is unchanged. Built on the MCP SDK's
+`StreamableHTTPServerTransport` (stateful, per-session), with `createServer(store)` shared between
+the stdio and HTTP paths so the handshake-based client provenance (D-024) works identically over
+HTTP. Multiple concurrent HTTP sessions share **one** `FileStore`; the Phase 2 lock +
+re-read-before-write (D-022) make simultaneous saves safe within the process (covered by a
+concurrent-two-session test).
+**Auth:** a bearer token via `JAMGATE_TOKEN`, **required** in HTTP mode — the server refuses to
+start without it and says so. Every request is gated; a missing/wrong token is a flat `401`. The
+comparison is **constant-time** (`crypto.timingSafeEqual`, length-independent) so the token can't
+be recovered from response timing.
+**TLS is out of process by design** — terminate it at a reverse proxy (caddy/nginx). Jamgate binds
+to `127.0.0.1` by default (`JAMGATE_HOST` to override) so the proxy is the only public door; we do
+not ship in-process TLS (cert management, renewal, and secure defaults are the proxy's job, and
+doing it ourselves would be a worse, home-grown version of a solved problem).
+**Honest limits, stated as deliberate scope:** whoever holds the token holds the whole memory, and
+there is **no multi-user tenancy — one instance = one human.** Jamgate's memory is *of one person*
+(RULES §0, D-016); per-user isolation, RBAC, and audit-per-identity are a different product. A team
+that wants shared-but-partitioned memory runs one instance per person. This keeps the security
+surface tiny (one secret, one store) and matches the core promise: *your own server, your own
+data.* **Why now:** the whole point of the project is "one mind, one memory across every agent"; as
+soon as the user has agents on a phone and multiple machines, stdio (one local process per client)
+can't be that shared brain — a single reachable endpoint can. Extends D-010/D-019 (local-first
+default; storage/transport behind clean seams) toward the hosted tier without taking on the D-019
+cloud-tenancy obligations. Phase 5.

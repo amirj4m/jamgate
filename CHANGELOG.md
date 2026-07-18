@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-18
+
+Adds an **optional** self-hosted remote mode so one Jamgate instance can serve all of a
+single person's MCP clients — the Claude phone app, claude.ai, Claude Code, any Streamable
+HTTP client — from one shared memory. stdio stays the default; the local-first story is
+unchanged.
+
+### Added
+
+- **Remote mode (Streamable HTTP transport)** — `jamgate --http [--port 8420]` (or
+  `JAMGATE_HTTP=1` / `JAMGATE_PORT`) serves MCP over the SDK's
+  `StreamableHTTPServerTransport` at `/mcp`, with per-session management so multiple clients
+  connect concurrently. `createServer(store)` is now shared between the stdio and HTTP paths,
+  so handshake-based client provenance works identically over HTTP. Binds to `127.0.0.1` by
+  default (`JAMGATE_HOST` to override).
+- **Bearer-token auth** — remote mode requires `JAMGATE_TOKEN` and refuses to start without
+  it. Every request is gated; a missing or wrong token is a `401`. The comparison is
+  constant-time (`crypto.timingSafeEqual`, length-independent) so the token can't be
+  recovered from response timing.
+- **Concurrent HTTP sessions share one store safely** — multiple simultaneous sessions write
+  through the one `FileStore`, serialized by the existing lock + re-read-before-write; covered
+  by a two-session concurrent-write test.
+- **Docs** — a new README "Remote mode (self-hosted)" section (when to use it, the security
+  model, a systemd unit, Caddy and nginx snippets, and how to add the server as a custom
+  connector in the Claude app and via `claude mcp add --transport http` in Claude Code), plus
+  the honest limits (whoever holds the token holds the memory; one instance = one human).
+
+### Notes
+
+- Still 100% self-hosted: no Jamgate cloud, no telemetry. TLS is terminated by a reverse
+  proxy (caddy/nginx) by design — Jamgate does not ship in-process TLS.
+- Test suite grew from 89 to **107** tests on Node 20.x and 22.x; the base install still has
+  a single runtime dependency (`@modelcontextprotocol/sdk`, which provides the HTTP
+  transport).
+- Design rationale recorded as **D-029** in [`DECISIONS.md`](./DECISIONS.md).
+
 ## [0.1.0] - 2026-07-18
 
 First public release: a local-first, cross-agent memory quality gate delivered as an
@@ -69,5 +105,6 @@ single shared memory clean at write time instead of letting it bloat with junk.
 - Verified end-to-end over the MCP protocol and covered by an automated test suite
   (89 tests) running on Node 20.x and 22.x in CI.
 
-[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/amirj4m/jamgate/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/amirj4m/jamgate/releases/tag/v0.1.0

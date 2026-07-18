@@ -54,6 +54,41 @@ These files are plain text. The portability mechanism is **git**: commit them, p
 then `git clone` on Linux and everything (rules + state) comes with it. On Linux,
 `ln -s AGENTS.md CLAUDE.md` so one file serves every agent.
 
+## Update — 2026-07-18 (Phase 5: optional remote mode)
+Phase 5 goal met: **one self-hosted Jamgate instance can serve all of a person's MCP clients
+(phone app, claude.ai, Claude Code, any Streamable HTTP client) from one shared memory** —
+delivering the "one mind, one memory across every agent" vision beyond a single machine. Opt-in;
+stdio stays the default and local-first is unchanged. Version bumped 0.1.0 → **0.2.0**. Master CI
+expected green on Node 20.x/22.x. **`npm publish` is the only remaining step** (done interactively
+by the user; not run here).
+- **HTTP transport (D-029):** new `src/http.ts`. `jamgate --http [--port 8420]` (or `JAMGATE_HTTP=1`
+  / `JAMGATE_PORT`) serves MCP over the SDK's `StreamableHTTPServerTransport` at `/mcp`, stateful
+  per-session (tracked by `mcp-session-id`). `index.ts` refactored: `buildStore()` + `createServer`
+  shared between stdio and HTTP; `parseCliOptions()` picks the mode. Binds `127.0.0.1` by default
+  (`JAMGATE_HOST`). The SDK bundles `@hono/node-server`, so the Node HTTP transport needs no new dep.
+- **Auth:** `JAMGATE_TOKEN` **required** in HTTP mode — server refuses to start without it (clear
+  error). Every request gated; missing/wrong token → `401` + `WWW-Authenticate`. `bearerTokenMatches`
+  uses `crypto.timingSafeEqual`, length-independent (constant-time).
+- **TLS out of process by design:** terminate at caddy/nginx; documented, not implemented in-process.
+- **Concurrency:** multiple HTTP sessions share one `FileStore`; Phase 2 lock + re-read-before-write
+  (D-022) keep concurrent saves safe — proven by a two-session concurrent-write test (24 distinct
+  saves, none lost).
+- **Client provenance over HTTP:** verified D-024 handshake stamping works identically over HTTP
+  (each session gets its own `createServer`).
+- **Tests: 89 → 107** (`test/http.test.ts`, +18: CLI-parser, bearer-check, 401/404/400 auth gate via
+  raw fetch, MCP round-trip, wrong-token connect rejection, provenance, concurrent sessions). Stressed
+  the HTTP file 5× locally, 0 fails. Also smoke-tested the built CLI binary directly: no-token refusal,
+  401 unauthenticated, real MCP `initialize` handshake returning a session id.
+- **Docs:** README "Remote mode (self-hosted)" section (when/why, security model, systemd unit +
+  `EnvironmentFile`, Caddy + nginx snippets, Claude-app custom-connector + `claude mcp add --transport
+  http` steps, honest limits), env-var table rows (`JAMGATE_HTTP/PORT/HOST/TOKEN`), Status updated to
+  107 tests + remote layer. CHANGELOG 0.2.0. DECISIONS D-029 (new Phase 5 section). serverInfo → 0.2.0.
+- **Honest limits (stated as scope):** whoever holds the token holds the memory; **no multi-user
+  tenancy — one instance = one human**; single-process concurrency (not multi-node); no in-process TLS.
+- **Next / deploy:** wire it on the user's DigitalOcean droplet in a follow-up (systemd + Caddy +
+  domain), then add each device as a custom connector. Still open (pre-existing): thin classifier;
+  embedding-quality tuning; multi-device sync via user-held keys (D-018, a different path from remote).
+
 ## Update — 2026-07-18 (Phase 4: distribution)
 Phase 4 goal met (all but the two auth-gated steps): **anyone in the world can install with
 one command.** Repo, README, CHANGELOG, release, and registry manifest are all shipped;
