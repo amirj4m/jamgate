@@ -54,6 +54,44 @@ These files are plain text. The portability mechanism is **git**: commit them, p
 then `git clone` on Linux and everything (rules + state) comes with it. On Linux,
 `ln -s AGENTS.md CLAUDE.md` so one file serves every agent.
 
+## Update — 2026-07-18 (Phase 7: deploy button)
+Phase 7 goal met: **a non-technical user can click a button, log into a hosting platform, and
+get their own hosted Jamgate instance (URL + token) — no terminal.** Version bumped 0.3.0 →
+**0.4.0**. Third rung on the install ladder (local `npx` setup → deploy button → own VPS). We
+host nothing — instance + data live in the user's own platform account (**D-031: deploy is
+convenience, not hosting**).
+- **`GET /healthz` (D-031):** unauthenticated liveness endpoint added to `src/http.ts` *before*
+  the auth gate — `200 {"status":"ok","version":...}`, exposes no memory/session/config. New
+  `src/version.ts` `VERSION` constant shared by serverInfo + healthz (was a hardcoded string).
+- **Platform `$PORT`:** `parseCliOptions` now honors `$PORT` (Railway/Render inject it) after
+  `--port`/`JAMGATE_PORT`, before the 8420 default.
+- **`Dockerfile` + `.dockerignore`:** multi-stage `node:22-alpine` (build compiles TS; runtime =
+  prod-only deps + `dist/`), non-root `node` user, binds `0.0.0.0`, store on `/data` volume
+  (`JAMGATE_STORE=/data/memory.json`), Node-based HEALTHCHECK on `/healthz`. **`JAMGATE_PORT`
+  deliberately NOT set in the image** so `$PORT` wins (caught + fixed a bug where setting it broke
+  port injection). Base install (embeddings peer omitted), like the `.mcpb`.
+- **Render (`render.yaml`) — LIVE button today:** Docker web service, `generateValue` for
+  `JAMGATE_TOKEN`, 1 GB disk at `/data`, `healthCheckPath: /healthz`, `plan: starter` (disk needs
+  paid). `render.com/deploy?repo=…` reads it from the repo; works with only a platform login.
+- **Railway (`railway.json`) — button PREPARED, not live:** file pins DOCKERFILE build + `/healthz`
+  + restart policy, but Railway volumes/secrets are **template-level**, so the one-click button
+  needs a one-time **template publish** in the user's Railway workspace (add volume `/data`, add
+  `JAMGATE_TOKEN=${{ secret(32) }}`, Generate Template, publish → paste `/new/template/<code>`).
+  Documented in README; button markdown left commented until the code exists.
+- **No new runtime deps** — Docker adds only build tooling; healthz is Node stdlib (D-010 holds).
+- **Tests: 131 → 138** (+7 in `test/http.test.ts`: healthz status+version/no-auth/no-leak/405,
+  `$PORT` honored + precedence). All green, Node 20.x/22.x.
+- **Docker NOT installed on build machine (honest):** image layering was not built. Verified
+  instead locally — booted server with the image's exact env (`JAMGATE_HTTP=1 JAMGATE_HOST=0.0.0.0
+  JAMGATE_STORE=… PORT=7777`): bound `0.0.0.0:7777` (PORT honored), `/healthz`→200 no-auth,
+  `/mcp`→401 no-token, POST `/healthz`→405; and `npm ci --omit=dev` resolves prod deps (SDK
+  present, transformers absent). HTTP MCP round-trip covered by existing suite.
+- **Docs:** README "Deploy your own (no terminal needed)" section (buttons, ~$5–7/mo honesty,
+  data location, get URL+token, connect desktops via `npx jamgate setup --remote`/phones via
+  custom connector) + Status bullet; DECISIONS D-031 (new Phase 7 section); CHANGELOG 0.4.0.
+- **Not done here:** `npm publish` (user runs interactively — one 0.4.0 publish covers 0.2–0.4);
+  GitHub release v0.4.0; Railway template publish (interactive).
+
 ## Update — 2026-07-18 (Phase 6: one-click install)
 Phase 6 goal met: **install friction reduced to near-zero for every client.** Version bumped
 0.2.0 → **0.3.0**; master CI green on Node 20.x/22.x; **v0.3.0 GitHub release published with the
