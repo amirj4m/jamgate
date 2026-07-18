@@ -38,7 +38,8 @@ single shared memory clean at write time instead of letting it bloat with junk.
   overridable via `JAMGATE_TTL_<TYPE>_DAYS`. Expired records stop surfacing in recall but
   are retained for audit until compaction.
 - **Concurrency safety** — a lock file with stale-lock detection plus re-read-before-write
-  serializes agents that share one store, so no write is lost.
+  serializes agents that share one store, so no write is lost; a waiter never abandons the
+  lock while a live holder still has it, so a heavily loaded machine can't drop a save.
 - **Schema versioning** — the store carries a `schemaVersion` (now 2) and older formats
   migrate automatically.
 
