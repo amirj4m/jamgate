@@ -312,7 +312,11 @@ export async function runStatus(opts: {
     clients.push({ id: client.id, label: client.label, path, detected, wired, transport });
   }
 
+  // Mirror the store's own path resolution (FileStore: JAMGATE_STORE ?? ~/.jamgate/memory.json)
+  // so status reports where memories actually live.
   const storePath =
-    opts.storePath ?? join(env.HOME || env.USERPROFILE || homedir(), ".jamgate", "memory.json");
+    opts.storePath ??
+    env.JAMGATE_STORE ??
+    join(env.HOME || env.USERPROFILE || homedir(), ".jamgate", "memory.json");
   return { clients, storePath };
 }

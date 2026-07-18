@@ -404,6 +404,16 @@ describe("runStatus (against a temp home)", () => {
     assert.equal(report.storePath, join(home, ".jamgate", "memory.json"));
   });
 
+  it("honors JAMGATE_STORE when reporting the store path", async () => {
+    const { env, cleanup } = await tempHome();
+    cleanups.push(cleanup);
+    const report = await runStatus({
+      platform: "linux",
+      env: { ...env, JAMGATE_STORE: "/custom/mem.json" },
+    });
+    assert.equal(report.storePath, "/custom/mem.json");
+  });
+
   it("reports http transport for a remote-wired client", async () => {
     const { home, env, cleanup } = await tempHome();
     cleanups.push(cleanup);
