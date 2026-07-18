@@ -16,7 +16,7 @@ npx jamgate setup
 ```
 
 [![Add to Cursor](https://img.shields.io/badge/Add%20to-Cursor-000?logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=jamgate&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyJqYW1nYXRlIl19)
-&nbsp;•&nbsp; one-click **Claude Desktop** bundle → [latest release](https://github.com/amirj4m/jamgate/releases/latest) (`jamgate.mcpb`)
+&nbsp;•&nbsp; one-click **Claude Desktop** bundle → the `.mcpb` on the [latest release](https://github.com/amirj4m/jamgate/releases/latest)
 
 ## The problem: memory quality, not storage
 
@@ -113,10 +113,10 @@ Prefer to wire it yourself? Each client is a small config change.
 claude mcp add jamgate -- npx jamgate
 ```
 
-**Claude Desktop** — one-click: download `jamgate.mcpb` from the
+**Claude Desktop** — one-click: download the `.mcpb` bundle from the
 [latest release](https://github.com/amirj4m/jamgate/releases/latest) and open it (Claude
-Desktop → Settings → Extensions), or add to `claude_desktop_config.json` (Settings →
-Developer → Edit Config):
+Desktop → Settings → Extensions; the bundle is unsigned, so you may see an "unverified"
+prompt). Or add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
 
 ```json
 {
