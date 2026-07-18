@@ -317,3 +317,43 @@ bundle** (MCPB manifest v0.3, built headlessly with `@anthropic-ai/mcpb`, ships 
 asset). The bundle omits the optional embeddings peer, so it behaves like a base install (fuzzy
 recall) — verified to boot on stdio and answer `initialize` + `tools/list` from its bundled deps.
 Phase 6.
+
+## Phase 7 — Deploy button: a hosted instance for non-technical users, without us hosting
+
+### D-031 — Deploy templates are convenience, not hosting; we never touch user data
+Give a non-technical user a third rung on the install ladder (local `npx` setup → **deploy
+button** → own VPS): click a button in the README, log into a hosting platform, and get **their
+own** Jamgate instance with a URL and token — no terminal, no server knowledge. This closes the
+multi-device gap for people who will never run `systemd` + Caddy but do have agents on a phone,
+a browser, and a laptop.
+**The hard rule that makes this safe: a deploy button is *convenience*, not *hosting*.** The
+instance runs in **the user's own account** on **their** platform; the memory store lives on a
+disk **they** own and pay for; **Jamgate hosts nothing, proxies nothing, and has no telemetry**.
+We never see or touch their data. This is a direct extension of the D-029 "your server, your
+data" promise and the D-010 local-first ethos — we are handing the user a pre-filled deploy form,
+not a service. The cost (~$5–7/month for a tiny always-on instance + small disk) is paid by the
+user to the platform; **we take no cut and run no cloud** (RULES §0: impact, not profit).
+**Mechanism.** A **multi-stage `Dockerfile`** (`node:22-alpine`, non-root `node` user, prod-only
+deps, base install / fuzzy recall — the embeddings peer is omitted, matching the `.mcpb` bundle).
+It runs Remote mode (D-029): binds `0.0.0.0`, keeps the store on a `/data` volume
+(`JAMGATE_STORE=/data/memory.json`), and **honors the platform's `$PORT`** — `JAMGATE_PORT` is
+left unset in the image precisely so `$PORT` wins (setting it would break port injection). A new
+unauthenticated **`GET /healthz`** (200 `{status, version}`, before the auth gate, exposing no
+memory) gives platforms a liveness probe.
+- **Render** — [`render.yaml`](./render.yaml) is a complete blueprint: Docker web service,
+  `healthCheckPath: /healthz`, a generated `JAMGATE_TOKEN` (`generateValue: true`), and a 1 GB
+  disk at `/data`. The `render.com/deploy?repo=…` button reads it from the repo, so it **works
+  today** with no manual account setup beyond login (a disk forces a paid `starter` instance).
+- **Railway** — [`railway.json`](./railway.json) pins the Dockerfile build + `/healthz` + restart
+  policy. But Railway **volumes and generated secrets are template-level, not file-level**, and
+  the "Deploy on Railway" button needs a *published template* (`railway.com/new/template/<code>`).
+  Publishing a template is an interactive workspace step that can't be done headlessly, so the
+  button is **prepared but not live**; the exact remaining maintainer clicks (add volume at
+  `/data`, add `JAMGATE_TOKEN=${{ secret(32) }}`, Generate Template, publish) are documented in
+  the README — **honesty over a button that 404s**.
+**No new runtime dependencies** — the Docker image adds only build tooling, and the health
+endpoint is Node stdlib (D-010 holds). **Verification honesty:** Docker was not installed on the
+build machine, so the image layering was not built; instead the exact runtime env (0.0.0.0 bind,
+`$PORT` honored, `/healthz` unauthenticated, `/mcp` 401 without a token) and the `--omit=dev`
+production install were verified locally, and the HTTP MCP round-trip is covered by the existing
+test suite. Phase 7.

@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-18
+
+Deploy button: a third rung on the install ladder (local setup → **deploy button** → own
+server) so a non-technical user can click a button, log into a hosting platform, and get their
+**own** Jamgate instance with a URL and token — no terminal. We host nothing: the instance and
+its data live in the user's own platform account (see DECISIONS D-031).
+
+### Added
+
+- **`GET /healthz`** — an unauthenticated liveness endpoint on the HTTP transport that returns
+  `200 {"status":"ok","version":...}` before the auth gate. It exposes only liveness and version,
+  never any memory, session, or config data, so deploy platforms can health-check the container.
+- **Platform `$PORT` support** — `--http` now honors the `$PORT` env that PaaS hosts (Railway,
+  Render, …) inject, falling back to `JAMGATE_PORT`, then `8420`. An explicit `--port` /
+  `JAMGATE_PORT` still wins.
+- **`Dockerfile` + `.dockerignore`** — a multi-stage `node:22-alpine` image (build stage compiles
+  TypeScript; runtime stage carries prod-only deps + `dist/`), running as the non-root `node`
+  user. Runs Remote mode: binds `0.0.0.0`, keeps the store on a `/data` volume
+  (`JAMGATE_STORE=/data/memory.json`), honors `$PORT`, and ships a Node-based `HEALTHCHECK`
+  against `/healthz`. A base install (fuzzy recall) — the optional embeddings peer is omitted.
+- **Render blueprint** — [`render.yaml`](./render.yaml): a Docker web service with a generated
+  `JAMGATE_TOKEN`, a 1 GB persistent disk at `/data`, and `/healthz` health checks. The
+  "Deploy to Render" button reads it from the repo, so it works with only a platform login.
+- **Railway config** — [`railway.json`](./railway.json) pins the Dockerfile build, `/healthz`
+  check, and restart policy. The one-click "Deploy on Railway" button needs a one-time template
+  publish (volumes/secrets are template-level on Railway); the exact remaining steps are
+  documented in the README.
+- **README "Deploy your own (no terminal needed)"** — the buttons, honest cost (~$5–7/mo paid to
+  the platform, not us), where the data lives, how to read the URL + token after deploy, and how
+  to connect desktops (`npx jamgate setup --remote <url> --token <t>`) and phones (custom
+  connector).
+
+### Changed
+
+- The MCP `serverInfo.version` and the new `/healthz` payload now share one `VERSION` constant
+  (`src/version.ts`) instead of a hardcoded string, so they can't drift.
+
+### Tests
+
+- +7 tests: `/healthz` returns status + version without auth, leaks no memory, and rejects
+  non-GET methods; `$PORT` is honored with the correct precedence vs `--port` / `JAMGATE_PORT`.
+  131 → 138 total.
+
 ## [0.3.0] - 2026-07-18
 
 One-click install: go from zero to wired across every MCP client on your machine with a
@@ -142,7 +185,8 @@ single shared memory clean at write time instead of letting it bloat with junk.
 - Verified end-to-end over the MCP protocol and covered by an automated test suite
   (89 tests) running on Node 20.x and 22.x in CI.
 
-[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/amirj4m/jamgate/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/amirj4m/jamgate/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/amirj4m/jamgate/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/amirj4m/jamgate/releases/tag/v0.1.0

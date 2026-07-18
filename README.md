@@ -192,6 +192,75 @@ All configuration is via environment variables; every one has a sensible default
 | `JAMGATE_HOST` | `127.0.0.1` | Interface to bind in remote mode. Keep it on localhost behind a reverse proxy. |
 | `JAMGATE_TOKEN` | — | Bearer token required in remote mode. The server refuses to start without it. |
 
+## Deploy your own (no terminal needed)
+
+Want one shared memory across your **phone, browser, and laptop** but don't want to run a
+server? Click a button, log into a hosting platform, and you get **your own** Jamgate instance
+with its own URL and token — no terminal, no server knowledge. Same gate, same store as the
+local install; only the transport is over the network (this is [Remote mode](#remote-mode-self-hosted),
+set up for you).
+
+**What you should know first (honest version):**
+
+- **You pay the platform directly — we host nothing.** A tiny always-on instance with a small
+  persistent disk runs roughly **$5–7/month** on Railway or Render. That bill is between you and
+  the platform; Jamgate takes no cut and runs no cloud.
+- **Your instance, your data.** The memory store lives on a disk *in your account* on *your*
+  platform. Jamgate never sees it, never proxies it, has no telemetry. A deploy button is
+  convenience, not hosting — see [DECISIONS D-031](./DECISIONS.md).
+- **Whoever holds the token holds the memory.** The deploy generates a strong bearer token for
+  you. Treat it like a password. There are no per-user accounts (one instance = one person; see
+  [Honest limits](#honest-limits-read-this)).
+
+### Deploy to Render (works today)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/amirj4m/jamgate)
+
+The button reads [`render.yaml`](./render.yaml) straight from this repo: it builds the image from
+the [`Dockerfile`](./Dockerfile), **generates a random `JAMGATE_TOKEN` for you**, and attaches a
+1 GB persistent disk at `/data` for your memory. Render provisions a paid `starter` instance
+(a disk needs one). After it goes live, read your token under **Environment**, and your URL is
+the service URL with `/mcp` appended (e.g. `https://jamgate-xxxx.onrender.com/mcp`).
+
+### Deploy on Railway
+
+Railway deploys need a *published template* to auto-generate the token and attach the volume —
+that's a one-time step in the maintainer's Railway workspace, so the button below is **not live
+yet**. [`railway.json`](./railway.json) already pins the Dockerfile build and the `/healthz`
+check, so a manual "deploy from repo" works now; the one-click button lands once the template is
+published.
+
+<!-- After publishing the template, paste its code and enable this button:
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/TEMPLATE_CODE)
+-->
+
+*Maintainer steps to make the button live (one time):* create a project from this repo on
+Railway → add a **Volume** mounted at `/data` → add a variable `JAMGATE_TOKEN` with a generated
+value (`${{ secret(32) }}`) → **Settings → Generate Template from Project** → publish, then paste
+the resulting `railway.com/new/template/<code>` URL into the button markdown above.
+
+### Get your URL and token, then connect your devices
+
+Once the deploy is live you have two things: a **URL** ending in `/mcp` and a **token** (from the
+platform's environment/variables tab). Connect each device to the same instance so they share one
+memory:
+
+- **Desktops (Claude Code, Cursor, Windsurf) — one command:**
+
+  ```bash
+  npx jamgate setup --remote https://your-instance/mcp --token <your-token>
+  ```
+
+  This wires every detected client on that machine to your instance (Streamable HTTP clients
+  only; others are skipped with a reason).
+
+- **Phone (Claude app) and claude.ai in a browser:** Settings → **Connectors** → *Add custom
+  connector* → URL `https://your-instance/mcp`, and provide the bearer token when asked. The same
+  three tools (`save_memory`, `recall_memory`, `forget_memory`) then work from your phone.
+
+Save on your phone, recall on your laptop — one memory, everywhere. For the full server-owner
+path (your own VPS, systemd + Caddy), keep reading.
+
 ## Remote mode (self-hosted)
 
 By default Jamgate runs **locally over stdio** — one process per agent, on your machine, no
@@ -377,9 +446,12 @@ for the full scope):
 - **One-click install** — `npx jamgate setup` wires every detected client (Claude Code,
   Claude Desktop, Cursor, Windsurf) in one idempotent, backup-first command, plus a Cursor
   deeplink and a Claude Desktop `.mcpb` bundle.
+- **Deploy your own** *(no terminal)* — a `Dockerfile`, a Render blueprint, and a Railway
+  config so a non-technical user can click a button, log into a platform, and get their own
+  hosted instance with a generated token and a persistent disk. We host nothing.
 
 Verified end-to-end over the MCP protocol (both stdio and HTTP) and covered by an automated
-test suite (131 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
+test suite (138 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
 (trained on the local decision log) and multi-device sync (see [`DECISIONS.md`](./DECISIONS.md)).
 **Goal: impact, not profit — open-source (MIT), built in the open.**
 
