@@ -1,0 +1,25 @@
+# Keep the build context small and reproducible. The image builds dist/ from src/ itself, so
+# no build output, deps, or local cruft should be copied in.
+node_modules
+dist
+dist-test
+build
+*.log
+.DS_Store
+.git
+.github
+.gitignore
+.claude
+.mcpb
+*.mcpb
+mcp-publisher
+test
+scripts
+docs
+*.md
+!README.md
+LICENSE
+render.yaml
+railway.json
+Dockerfile
+.dockerignore
