@@ -8,6 +8,7 @@ import {
 import { pathToFileURL } from "node:url";
 import { FileStore } from "./store/fileStore.js";
 import { loadTransformersEmbedder, resolveDupThreshold } from "./embeddings/embedder.js";
+import { parseCliOptions, startHttpServer } from "./http.js";
 import type { ClientInfo, MemoryStore } from "./store/types.js";
 import { prefilter } from "./gate/prefilter.js";
 import { deriveSubject } from "./gate/subject.js";
@@ -28,7 +29,7 @@ export function createServer(
   gateLog: GateLogConfig = resolveGateLogConfig(),
 ): Server {
   const server = new Server(
-    { name: "jamgate", version: "0.1.0" },
+    { name: "jamgate", version: "0.2.0" },
     { capabilities: { tools: {} } },
   );
 
@@ -200,18 +201,48 @@ export function createServer(
   return server;
 }
 
-async function main() {
-  // Optional local embeddings (D-026): try to load the model; null → fuzzy recall only.
+/** Build the default FileStore, wiring in optional local embeddings (D-026). Shared by the
+ *  stdio and HTTP bootstraps so both run identical gate/store behaviour. */
+async function buildStore(): Promise<FileStore> {
   // Loading is lazy and best-effort so the base install and offline/CI runs work unchanged.
   const embedder = await loadTransformersEmbedder();
   if (embedder) console.error(`jamgate: semantic embeddings active (${embedder.id})`);
   else console.error("jamgate: running on fuzzy recall (no embedding model loaded)");
 
   // Depend on the adapter contract, not a concrete backend (D-019).
-  const store = new FileStore(undefined, {
+  return new FileStore(undefined, {
     embedder: embedder ?? undefined,
     dupThreshold: resolveDupThreshold(),
   });
+}
+
+async function main() {
+  const opts = parseCliOptions(process.argv.slice(2));
+  const store = await buildStore();
+
+  if (opts.http) {
+    // Opt-in remote mode (D-029). stdio stays the default; this only runs on --http /
+    // JAMGATE_HTTP. A bearer token is mandatory — refuse to start without one, rather than
+    // silently exposing a memory over the network.
+    const token = process.env.JAMGATE_TOKEN;
+    if (!token || token.trim() === "") {
+      console.error(
+        "jamgate: HTTP mode requires a bearer token, but JAMGATE_TOKEN is not set.\n" +
+          "  Set a strong secret and restart, e.g.:\n" +
+          "    JAMGATE_TOKEN=$(openssl rand -hex 32) jamgate --http\n" +
+          "  TLS must be terminated by a reverse proxy (caddy/nginx); see the README " +
+          '"Remote mode" section. Refusing to start.',
+      );
+      process.exit(1);
+    }
+    const running = await startHttpServer({ store, token, port: opts.port });
+    console.error(
+      `jamgate MCP server running on http://${running.host}:${running.port}${running.path} ` +
+        "(bearer auth required; terminate TLS at a reverse proxy)",
+    );
+    return;
+  }
+
   const server = createServer(store);
   const transport = new StdioServerTransport();
   await server.connect(transport);
