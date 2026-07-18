@@ -54,6 +54,48 @@ These files are plain text. The portability mechanism is **git**: commit them, p
 then `git clone` on Linux and everything (rules + state) comes with it. On Linux,
 `ln -s AGENTS.md CLAUDE.md` so one file serves every agent.
 
+## Update — 2026-07-18 (Phase 4: distribution)
+Phase 4 goal met (all but the two auth-gated steps): **anyone in the world can install with
+one command.** Repo, README, CHANGELOG, release, and registry manifest are all shipped;
+only the two steps that need interactive login (npm publish, MCP Registry publish) remain,
+and this session is non-interactive so they're handed off. Master + tag CI both green.
+- **Package (v0.1.0):** bumped 0.0.1 → 0.1.0 (first real minor). npm name `jamgate` is
+  FREE (verified `npm view` 404) — no scope fallback needed. Added keywords (mcp,
+  model-context-protocol, memory, ai-agents, quality-gate, claude, cursor, local-first,
+  embeddings, llm), author, repository/homepage/bugs URLs, `files` whitelist (dist, README,
+  LICENSE), and `prepublishOnly: npm run build` (dist/ is gitignored so the tarball must
+  build fresh). `bin.jamgate → dist/index.js` (shebang present; npm sets +x on install —
+  verified by installing the packed tarball into a temp project and booting it over stdio,
+  all 3 tools listed). Synced hardcoded serverInfo version to 0.1.0. `npm pack` = 15 files,
+  ~24 kB, no test/doc internals.
+- **README overhaul (storefront):** npx one-liner (`claude mcp add jamgate -- npx jamgate`),
+  before/after gate ASCII, gate-layer table, Claude Code/Desktop/Cursor config blocks,
+  optional-embeddings section, env-var table, honest comparison vs Mem0/OpenMemory &
+  Zep/Graphiti (their strengths acknowledged), privacy section, CI/npm/license badges.
+- **CHANGELOG.md:** Keep-a-Changelog, 0.1.0 entry summarizing Phases 1–3.
+- **Lock hardening (fix, folded into 0.1.0):** the write lock's acquisition `timeoutMs`
+  (was 10s) could fire while a live holder was mid-write on a loaded box → waiter proceeded
+  WITHOUT the lock → dropped save. Surfaced as a rare CI flake in the concurrency test
+  (passed on master, flaked on the tag run, same commit). Fix: align `timeoutMs` with
+  `staleMs` (both 30s) so a waiter only reaches the give-up branch after the lock is
+  stealable-as-stale (stale-steal happens first) → never clobbers a live holder. 89 tests
+  still green; stressed 20× locally, 0 fails.
+- **Released:** tag `v0.1.0` (moved to include the lock fix since npm publish hadn't
+  happened) + GitHub Release with CHANGELOG-derived notes.
+- **MCP Registry manifest:** added `server.json` (name `io.github.amirj4m/jamgate`, npm
+  package `jamgate`, stdio) + `mcpName` in package.json. Registry is now the source of
+  truth (feeds PulseMCP crawl; the modelcontextprotocol/servers README community list is
+  RETIRED). server.json is NOT in the npm tarball (kept out of `files`).
+- **PENDING (auth-gated, handed off to the user):**
+  - `npm login && npm publish` — not authenticated here (`npm whoami` → ENEEDAUTH).
+  - MCP Registry publish — needs interactive `mcp-publisher login github` (device OAuth).
+  - mcpservers.org — web form at https://mcpservers.org/submit (Category: Memory), NOT a PR.
+  - PulseMCP — auto-crawls the registry/npm; claim the listing once it appears.
+  - Auto-publish CI workflow — SKIPPED on purpose: no `NPM_TOKEN` repo secret exists
+    (`gh secret list` empty); did not create a workflow that would fail on every tag.
+- **Still open (post-4):** thin classifier; embedding-quality tuning; multi-device sync
+  (D-018); HTTP/remote transport.
+
 ## Update — 2026-07-17 (Phase 3: intelligence)
 Phase 3 goal met: **the gate moves from exact-match rules toward semantic understanding,
 without giving up local-first or the zero-config install.** Five items, each its own
