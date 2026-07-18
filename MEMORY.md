@@ -54,6 +54,40 @@ These files are plain text. The portability mechanism is **git**: commit them, p
 then `git clone` on Linux and everything (rules + state) comes with it. On Linux,
 `ln -s AGENTS.md CLAUDE.md` so one file serves every agent.
 
+## Update — 2026-07-18 (Phase 6: one-click install)
+Phase 6 goal met: **install friction reduced to near-zero for every client.** Version bumped
+0.2.0 → **0.3.0**; master CI green on Node 20.x/22.x; **v0.3.0 GitHub release published with the
+`.mcpb` asset**. `npm publish` remains the only step not done here (user runs it interactively — one
+publish of 0.3.0 covers 0.2.0 too, since 0.2.0 was never published).
+- **`jamgate setup` / `jamgate status` (D-030):** new `src/setup/` — pure `clients.ts` (registry +
+  per-platform config paths + entry/deeplink builders), pure `merge.ts` (JSON merge), IO `runner.ts`,
+  terminal `cli.ts`. Wired into `index.ts` as subcommands before any store/transport bootstrap.
+  `setup` detects Claude Code / Claude Desktop / Cursor / Windsurf and wires each: **idempotent,
+  never clobbers non-jamgate entries, backs up to `<file>.jamgate-backup` before writing.** Flags:
+  `--dry-run`, `--remote <url> --token <t>` (HTTP entries for Claude Code + Cursor; Claude Desktop &
+  Windsurf skipped-with-reason on remote — no verified HTTP path). Claude Code prefers `claude mcp
+  add --scope user` when the CLI is present, else merges `~/.claude.json`; its stdio entry is written
+  in Claude Code's `{type,command,args,env}` shape so a CLI-added entry reads as already-configured.
+  `status` mirrors FileStore path resolution (`JAMGATE_STORE ?? ~/.jamgate/memory.json`).
+- **Cursor deeplink:** `cursor://anysphere.cursor-deeplink/mcp/install?name=jamgate&config=<base64 of
+  {command,args}>` — payload verified to round-trip; "Add to Cursor" badge in README.
+- **Claude Desktop `.mcpb`:** `scripts/build-mcpb.mjs` stages compiled server + production-only deps
+  (optional transformers peer omitted → fuzzy-recall base install), writes MCPB manifest v0.3, packs
+  headlessly with `@anthropic-ai/mcpb`. Output `build/jamgate.mcpb` (gitignored); shipped as release
+  asset `jamgate-0.3.0.mcpb` (3.2 MB). **Verified:** manifest validates, bundle boots on stdio and
+  answers `initialize` + `tools/list` from its bundled deps, serverInfo 0.3.0. Unsigned (Desktop may
+  prompt "unverified") — signing not required to install; noted in docs.
+- **No new runtime deps** — whole helper is Node stdlib (zero-dep philosophy, D-010, holds).
+- **Tests: 107 → 132** (`test/setup.test.ts`, +25: entry shapes, per-platform paths, deeplink
+  round-trip, pure merge incl. no-clobber/idempotency/malformed, runner against temp home — configure,
+  re-run, backup, dry-run, not-found, remote-skip, claude-CLI path + fallback, status incl.
+  JAMGATE_STORE). No test touches real home configs.
+- **Not verified headlessly (honest):** actually launching Cursor/Windsurf/Claude Desktop GUIs to
+  confirm they pick up the entry, the deeplink opening Cursor, and the `.mcpb` GUI install flow —
+  config-file writing and bundle boot are verified; the GUI handshakes are inherently not testable here.
+- **Docs:** README Quick start → Option A (`npx jamgate setup`) / Option B (per-client manual, kept
+  for transparency) + badges; DECISIONS D-030 (new Phase 6 section); CHANGELOG 0.3.0; serverInfo 0.3.0.
+
 ## Update — 2026-07-18 (Phase 5: optional remote mode)
 Phase 5 goal met: **one self-hosted Jamgate instance can serve all of a person's MCP clients
 (phone app, claude.ai, Claude Code, any Streamable HTTP client) from one shared memory** —
