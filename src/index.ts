@@ -5,6 +5,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { VERSION } from "./version.js";
 import { FileStore } from "./store/fileStore.js";
@@ -265,8 +266,24 @@ async function main() {
   console.error("jamgate MCP server running on stdio");
 }
 
-// Only bootstrap stdio when run as the CLI entrypoint, not when imported by a test.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/** True when this module is the process entrypoint (run as the CLI), not imported by a test.
+ *  Must compare against the *realpath* of `process.argv[1]`: npm/npx install the bin as a
+ *  symlink (`node_modules/.bin/jamgate` → the real `dist/index.js`), so `process.argv[1]` is
+ *  the symlink path while `import.meta.url` is the resolved target. A naive equality check
+ *  fails there and `main()` never runs — the wizard exits 0 with no output (the 0.4.0 bug).
+ *  Resolving the symlink first makes both sides the same real file. */
+function isMainEntrypoint(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    // realpathSync throws if the path doesn't exist; fall back to the raw comparison.
+    return import.meta.url === pathToFileURL(entry).href;
+  }
+}
+
+if (isMainEntrypoint()) {
   main().catch((err) => {
     console.error("jamgate fatal:", err);
     process.exit(1);
