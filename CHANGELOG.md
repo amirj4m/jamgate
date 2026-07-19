@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-19
+
+### Fixed
+
+- **`jamgate setup` / `status` ran silently through npx** — `npx jamgate setup` exited 0 with
+  no report at all. npm installs the bin as a symlink (`node_modules/.bin/jamgate` →
+  `dist/index.js`), so `process.argv[1]` was the symlink path while `import.meta.url` was the
+  resolved target; the entrypoint guard compared them directly, so `main()` never ran and the
+  wizard produced no output. The guard now resolves the realpath of `process.argv[1]` before
+  comparing. A regression test runs the built binary through a symlink (the npx path) and
+  asserts a non-empty report reaches stdout, so this cannot ship again.
+
 ## [0.4.0] - 2026-07-18
 
 Deploy button: a third rung on the install ladder (local setup → **deploy button** → own
