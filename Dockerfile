@@ -39,11 +39,11 @@ RUN npm ci --omit=dev && npm cache clean --force
 # The compiled server.
 COPY --from=build /app/dist ./dist
 
-# Persistent store lives on a mounted volume at /data, owned by the non-root `node` user that
-# ships with the base image. Declaring the VOLUME documents the mount point for plain
-# `docker run`; Railway/Render attach their own managed disk here.
+# Persistent store lives at the mount point /data, owned by the non-root `node` user that
+# ships with the base image. The VOLUME directive is intentionally omitted: Railway rejects
+# any Dockerfile containing VOLUME at validation, before the build runs. Plain `docker run`
+# users pass `-v` themselves; Render/Railway attach their own managed disk at /data.
 RUN mkdir -p /data && chown -R node:node /data
-VOLUME ["/data"]
 
 # Defaults for remote mode. Bind to all interfaces (a container has no localhost proxy in front
 # of it) and keep the store on the volume. JAMGATE_TOKEN is intentionally NOT set here — it must
