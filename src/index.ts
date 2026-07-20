@@ -12,6 +12,7 @@ import { FileStore } from "./store/fileStore.js";
 import { loadTransformersEmbedder, resolveDupThreshold } from "./embeddings/embedder.js";
 import { parseCliOptions, startHttpServer } from "./http.js";
 import { setupCommand, statusCommand } from "./setup/cli.js";
+import { exportCommand, importCommand } from "./backup/cli.js";
 import type { ClientInfo, MemoryStore } from "./store/types.js";
 import { prefilter } from "./gate/prefilter.js";
 import { deriveSubject } from "./gate/subject.js";
@@ -230,6 +231,16 @@ async function main() {
   }
   if (argv[0] === "status") {
     process.exitCode = await statusCommand();
+    return;
+  }
+  // Backup & migration (D-033): dump or reload the store as JSON. Like setup/status these run
+  // before any server bootstrap — they only touch the store file, never open a transport.
+  if (argv[0] === "export") {
+    process.exitCode = await exportCommand(argv.slice(1));
+    return;
+  }
+  if (argv[0] === "import") {
+    process.exitCode = await importCommand(argv.slice(1));
     return;
   }
 

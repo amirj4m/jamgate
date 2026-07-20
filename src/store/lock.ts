@@ -89,13 +89,26 @@ export async function withFileLock<T>(
   }
 }
 
-/** Is the lock file old enough to be presumed abandoned? Unreadable/garbage → stale. */
-async function isStale(lockPath: string, staleMs: number): Promise<boolean> {
+/** Is the lock file old enough to be presumed abandoned?
+ *
+ *  Subtlety that used to cause a lost-update flake: acquiring the lock is two steps —
+ *  `open(wx)` creates an EMPTY file, then the holder writes its timestamp in a separate
+ *  `await`. In that gap the file exists but is empty. A naive `Number("".trim())` is `0`,
+ *  so `Date.now() - 0 > staleMs` read that just-born lock as ancient and STOLE it, letting
+ *  two writers run at once → one write clobbered the other (the intermittent "24 saves,
+ *  23 persisted" flake). So an empty/garbage body is NOT assumed stale: it is almost always
+ *  a lock mid-creation. We fall back to the file's mtime to age it out, so a genuinely
+ *  abandoned empty lock (holder crashed between create and write) still gets stolen after
+ *  `staleMs`, while a fresh one is left alone and the waiter simply retries. */
+export async function isStale(lockPath: string, staleMs: number): Promise<boolean> {
   try {
     const raw = await fs.readFile(lockPath, "utf8");
     const ts = Number(raw.trim());
-    if (!Number.isFinite(ts)) return true;
-    return Date.now() - ts > staleMs;
+    if (Number.isFinite(ts) && ts > 0) return Date.now() - ts > staleMs;
+    // Empty or non-numeric body: mid-creation (fresh) or a crashed holder's leftover.
+    // Judge by the file's own mtime instead of trusting the (missing) content.
+    const stat = await fs.stat(lockPath);
+    return Date.now() - stat.mtimeMs > staleMs;
   } catch (err) {
     // Vanished between EEXIST and now → not stale, just retry the create.
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-20
+
+Backup & migration: `jamgate export` and `jamgate import` so you can back up your memory, move
+it between machines, or lift a local store onto a server — one command instead of hand-copying
+`memory.json` (see DECISIONS D-033).
+
+### Added
+
+- **`jamgate export [--output <file>] [--active-only]`** — dumps the whole store as a
+  `schemaVersion` envelope (`{ schemaVersion, exportedAt, generator, memories }`). Both active
+  and superseded records are included by default; `--active-only` keeps just the live facts.
+  Writes to a file with `--output`/`-o`, otherwise to **stdout as pure JSON** (pipeable) with a
+  human-readable summary on **stderr**. Respects `JAMGATE_STORE`.
+- **`jamgate import <file> [--dry-run]`** — reads an export file (our envelope **or** a bare JSON
+  array) and replays **every record through the same quality gate** a live save uses — exact-dup
+  dedup, time-aware supersession, the contradiction/trust guard, and near-duplicate detection —
+  rather than blind-appending. Original `createdAt`/provenance are **preserved**, not reset.
+  Prints a per-outcome report (imported / duplicates skipped / superseded / conflicts flagged /
+  near-duplicates) and one line per record that needs attention. `--dry-run` reports without
+  writing. The whole import is one atomic, locked transaction. A malformed file is rejected with
+  a nonzero exit and the store is left untouched.
+
+### Fixed
+
+- **Lost-update flake under concurrent writes** — the store's file lock could be stolen while
+  brand-new: acquiring it is `open(wx)` (creates an **empty** file) followed by a separate write
+  of the holder's timestamp, and in that window a waiting writer parsed the empty body as
+  `Number("") === 0`, judged the fresh lock ancient (`now - 0 > staleMs`), and stole it — so two
+  writers ran at once and one write was clobbered. This surfaced intermittently as the concurrent
+  HTTP-sessions test persisting 23 of 24 saves and could fail the tag-triggered Publish run. The
+  staleness check now treats an empty/non-numeric lock body as *mid-creation* and ages it out by
+  the file's **mtime** instead, so a fresh lock is never stolen while a genuinely abandoned one
+  still recovers after `staleMs`. Covered by deterministic `isStale` unit tests.
+
 ## [0.4.1] - 2026-07-19
 
 ### Fixed

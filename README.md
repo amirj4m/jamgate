@@ -192,6 +192,44 @@ All configuration is via environment variables; every one has a sensible default
 | `JAMGATE_HOST` | `127.0.0.1` | Interface to bind in remote mode. Keep it on localhost behind a reverse proxy. |
 | `JAMGATE_TOKEN` | — | Bearer token required in remote mode. The server refuses to start without it. |
 
+## Backup & migration
+
+Your memory is one JSON file (`JAMGATE_STORE`, default `~/.jamgate/memory.json`), so a backup can
+be as simple as copying it. But `jamgate export` / `jamgate import` do it properly — schema-aware,
+and with import passing every record back **through the same quality gate** so a restore or a
+machine-to-machine move can't smuggle in duplicates or overwrite a trusted fact.
+
+```bash
+# Back up everything (active + superseded history) to a file
+jamgate export --output backup.json
+
+# Only the live facts, and pipe it somewhere
+jamgate export --active-only > my-memory.json
+
+# Restore / merge into another machine's store (respects JAMGATE_STORE)
+jamgate import backup.json
+
+# See exactly what would happen first — nothing is written
+jamgate import backup.json --dry-run
+```
+
+**Export** writes a `{ schemaVersion, exportedAt, generator, memories }` envelope. Without
+`--output` it prints pure JSON to stdout (so it pipes cleanly) and the summary to stderr.
+
+**Import** accepts that envelope *or* a bare JSON array. Each active record is replayed through the
+gate — exact-duplicate dedup, time-aware supersession, the trust/contradiction guard, and
+near-duplicate detection — instead of being blindly appended, and original timestamps and
+provenance are **preserved** (your `createdAt` is never reset). It prints a per-record report
+(imported / duplicates skipped / superseded / conflicts flagged / near-duplicates); conflicts and
+near-duplicates are surfaced for you to decide, never silently resolved. The whole import is one
+atomic transaction — a malformed file is rejected with a nonzero exit and your store is left
+untouched. Records already retired (`superseded`) in the source are treated as history and skipped,
+not re-activated. See [DECISIONS D-033](./DECISIONS.md).
+
+> Moving a **local** store onto **your own server**? Export locally, copy the JSON up, then
+> `JAMGATE_STORE=/data/memory.json jamgate import my-memory.json` on the box (or just place the
+> file at `JAMGATE_STORE` — but `import` is what merges into an existing server store safely).
+
 ## Deploy your own (no terminal needed)
 
 Want one shared memory across your **phone, browser, and laptop** but don't want to run a

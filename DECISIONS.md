@@ -357,3 +357,54 @@ build machine, so the image layering was not built; instead the exact runtime en
 `$PORT` honored, `/healthz` unauthenticated, `/mcp` 401 without a token) and the `--omit=dev`
 production install were verified locally, and the HTTP MCP round-trip is covered by the existing
 test suite. Phase 7.
+
+## Phase 8 — Backup & migration: move your memory without hand-copying a file
+
+### D-033 — `export`/`import` are transports for the store; import goes through the gate, never around it
+Users need to back up their memory, move it to a new machine, or lift a local store onto a
+server. The honest primitive already exists (the store is one JSON file at `JAMGATE_STORE`), but
+"scp the file yourself" is fragile: it ignores schema versioning, and merging two stores by hand
+means either clobbering or blind-appending — both of which reintroduce exactly the junk the gate
+exists to keep out. So we add two subcommands that make backup a first-class, one-command
+operation while keeping the quality invariants intact.
+
+**`jamgate export`** dumps the store as the same `{ schemaVersion, memories }` envelope it uses
+on disk, plus `exportedAt`/`generator` provenance. It writes pure JSON to **stdout** (so it
+pipes) or to a file with `--output`, with the human summary on **stderr** so it never pollutes
+the data stream. Active **and** superseded records are included by default (a faithful snapshot
+for archival/audit); `--active-only` trims to live facts. Embeddings already on records are kept,
+so a near-duplicate check still has something to compare against on import.
+
+**`jamgate import`** is the load half, and its one firm rule is: **an import is a batch of saves,
+not a file copy.** Every incoming ACTIVE record is replayed through the *same* gate a live
+`save_memory` uses — exact-dup dedup, subject-based time-aware supersession, the trust/contradiction
+guard, and semantic near-duplicate detection — so importing can never smuggle in duplicates or
+let a low-trust fact silently overwrite a high-trust one. Records already marked `superseded` in
+the source are historical audit and are **not** re-activated through the gate; they are counted
+and skipped. Provenance is **preserved, not reset**: a record keeps its own id, `createdAt`,
+source, subject, type, client and embedding; only records *retired during this import* are
+re-stamped (at import time). Every outcome is reported per-record (imported / duplicate /
+superseded / conflict / near-duplicate); conflicts and near-duplicates are *flagged for a human*,
+never silently resolved — mirroring how the live gate hands ambiguous writes back to the agent.
+The whole batch runs under one store lock and a single write, so an import is atomic; `--dry-run`
+reports what would happen and writes nothing; a malformed file (bad JSON, wrong shape, a record
+with no `text`) is rejected with a nonzero exit before the store is touched. `import` also accepts
+a bare JSON array, not just our envelope, so a hand-written or third-party list still works.
+
+Mechanically this reused the gate rather than re-implementing it: the stateful checks in
+`FileStore.saveLocked` were extracted into a private `applyGate(candidate, memories, now)` that
+mutates an in-memory list without persisting, and both `save()` (one candidate, one write) and
+the new `importBatch()` (many candidates, one write) drive it. No behavior change to `save`.
+
+**Concurrency fix found along the way.** Building the import path surfaced the real cause of a
+long-standing intermittent flake (the concurrent-HTTP-sessions test persisting 23 of 24 saves,
+which had occasionally failed tag-triggered Publish runs). It was **not** the near-duplicate gate
+(that path needs embeddings, which neither CI nor a base install loads): it was the file lock.
+Acquiring the lock is `open(wx)` — which creates an **empty** file — followed by a *separate*
+write of the holder's timestamp. A waiter that checked staleness during that empty window read
+`Number("") === 0` and judged the just-born lock ancient (`now - 0 > staleMs`), stole it, and ran
+concurrently → one write clobbered another. The staleness check now treats an empty/non-numeric
+body as mid-creation and ages the lock out by its **mtime** instead of a phantom timestamp, so a
+fresh lock is never stolen while a genuinely abandoned one still recovers after `staleMs`. Proven
+by 15 consecutive green runs of the HTTP test and a ~1-3%→0 flake rate over 200+ trials, and
+pinned by deterministic `isStale` unit tests. Phase 8.

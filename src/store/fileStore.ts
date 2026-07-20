@@ -71,6 +71,11 @@ export class FileStore implements MemoryStore {
     this.dupThreshold = opts.dupThreshold ?? DEFAULT_DUP_THRESHOLD;
   }
 
+  /** The resolved on-disk path of this store, for reporting in the backup CLI (D-033). */
+  get storePath(): string {
+    return this.path;
+  }
+
   /** Best-effort embedding: returns the vector, or undefined if no embedder is configured
    *  or the embedder fails (recall/near-dup then degrade to fuzzy for this call). */
   private async embed(text: string): Promise<number[] | undefined> {
@@ -162,12 +167,6 @@ export class FileStore implements MemoryStore {
 
   private async saveLocked(input: SaveInput): Promise<SaveResult> {
     const memories = await this.readAll();
-    const norm = input.text.trim().toLowerCase();
-
-    const existing = memories.find(
-      (m) => m.status === "active" && m.text.trim().toLowerCase() === norm,
-    );
-    if (existing) return { action: "duplicate", memory: existing };
 
     // Compute the semantic embedding once (best-effort). Stored on the record and reused
     // for near-duplicate detection below. Undefined when no embedder is configured.
@@ -191,46 +190,124 @@ export class FileStore implements MemoryStore {
       embedding,
     };
 
+    const result = this.applyGate(memory, memories, now);
+    // Only a write outcome (created/superseded) mutates the store. Duplicate/conflict/
+    // possible_duplicate are early rejections that leave the file untouched.
+    if (result.action === "created" || result.action === "superseded") {
+      // Opportunistic compaction: drop long-dead records as part of this same write, so
+      // the file self-prunes without a background scheduler (Phase 2, item 2).
+      const next = this.dropCompactable(memories, Date.now());
+      await this.writeAll(next);
+    }
+    return result;
+  }
+
+  /**
+   * The stateful write-time gate, applied to a fully-formed candidate against an in-memory
+   * `memories` list. Pure w.r.t. the disk — it MUTATES `memories` (pushing the candidate and
+   * marking retired records) on an accept/supersede, but never persists; the caller writes.
+   * Factored out of `saveLocked` so a bulk import can replay many candidates through the exact
+   * same rules under one lock and one write (D-033), instead of re-implementing the gate.
+   *
+   *  - exact-duplicate dedup (RULES §2.2)
+   *  - time-aware supersession by `subject` + recency (RULES §2.3, D-015)
+   *  - contradiction guard: a lower-trust source can't overwrite a higher-trust one (RULES §2.3)
+   *  - semantic near-duplicate flag when no subject drives supersession (D-026)
+   *
+   * `now` stamps the supersededAt/updatedAt on any retired records — for a live save it equals
+   * the candidate's createdAt; for an import it is the (real) import time, while the candidate
+   * keeps its original createdAt.
+   */
+  private applyGate(candidate: Memory, memories: Memory[], now: string): SaveResult {
+    const norm = candidate.text.trim().toLowerCase();
+    const existing = memories.find(
+      (m) => m.status === "active" && m.text.trim().toLowerCase() === norm,
+    );
+    if (existing) return { action: "duplicate", memory: existing };
+
     let retired: Memory[] = [];
-    if (memory.subject) {
+    if (candidate.subject) {
       const matches = memories.filter(
-        (m) => m.status === "active" && m.subject === memory.subject,
+        (m) => m.status === "active" && m.subject === candidate.subject,
       );
       if (matches.length > 0) {
         const maxTrust = Math.max(...matches.map((m) => TRUST[m.source]));
-        if (TRUST[memory.source] < maxTrust) {
+        if (TRUST[candidate.source] < maxTrust) {
           // Lower-trust fact can't silently overwrite a higher-trust one → flag, don't store.
-          return { action: "conflict", memory, conflictsWith: matches };
+          return { action: "conflict", memory: candidate, conflictsWith: matches };
         }
         // Equal-or-higher trust + newer → supersede by recency (D-015).
         retired = matches;
         for (const old of retired) {
           old.status = "superseded";
-          old.supersededBy = memory.id;
+          old.supersededBy = candidate.id;
           old.supersededAt = now;
           old.updatedAt = now;
         }
       }
-    } else if (embedding) {
+    } else if (candidate.embedding) {
       // No subject to drive supersession, and this isn't an exact duplicate — check whether
       // it is a SEMANTIC near-duplicate of something already on file (D-026). If so, don't
       // store it; hand the existing record back so the agent decides (mirrors "conflict",
       // never a silent drop). A subject-bearing save intentionally skips this: supplying a
       // subject signals intent to update, handled by supersession above.
-      const near = this.findNearDuplicates(embedding, memories);
+      const near = this.findNearDuplicates(candidate.embedding, memories);
       if (near.length > 0) {
-        return { action: "possible_duplicate", memory, possibleDuplicates: near };
+        return { action: "possible_duplicate", memory: candidate, possibleDuplicates: near };
       }
     }
 
-    memories.push(memory);
-    // Opportunistic compaction: drop long-dead records as part of this same write, so
-    // the file self-prunes without a background scheduler (Phase 2, item 2).
-    const next = this.dropCompactable(memories, Date.now());
-    await this.writeAll(next);
+    memories.push(candidate);
     return retired.length > 0
-      ? { action: "superseded", memory, retired }
-      : { action: "created", memory };
+      ? { action: "superseded", memory: candidate, retired }
+      : { action: "created", memory: candidate };
+  }
+
+  /**
+   * Full, unfiltered snapshot of the store for backup/export (D-033): active AND superseded
+   * records, expired ones included, in on-disk order. Read-only, so it runs without the write
+   * lock — the atomic temp+rename write path means a concurrent reader always sees a whole
+   * file, never a torn one. Any older on-disk shape is migrated in memory first.
+   */
+  async exportAll(): Promise<Memory[]> {
+    return this.readAll();
+  }
+
+  /**
+   * Replay a batch of pre-formed memories through the gate as one atomic transaction (D-033).
+   * Every ACTIVE record runs through the exact same rules as a live save (dedup, supersession,
+   * conflict guard, near-duplicate) — imports respect quality, they never blind-append. Records
+   * already marked `superseded` in the source are historical audit and are NOT re-activated
+   * through the gate; they are counted as skipped. The candidates keep their original ids,
+   * timestamps and provenance (only retired records are re-stamped at import time). The whole
+   * read-modify-write happens under one lock and a single write; `dryRun` reports what would
+   * happen and writes nothing.
+   */
+  async importBatch(
+    records: Memory[],
+    opts: { dryRun?: boolean } = {},
+  ): Promise<{ outcomes: SaveResult[]; skippedSuperseded: number; dryRun: boolean }> {
+    return this.withLock(async () => {
+      const memories = await this.readAll();
+      const now = new Date().toISOString();
+
+      // Only live facts go through the gate. Replay them oldest-first so recency-based
+      // supersession resolves deterministically, matching the order the facts were saved.
+      const active = records.filter((r) => (r.status ?? "active") === "active");
+      const skippedSuperseded = records.length - active.length;
+      active.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+      const outcomes: SaveResult[] = active.map((r) => this.applyGate(r, memories, now));
+
+      const changed = outcomes.some(
+        (o) => o.action === "created" || o.action === "superseded",
+      );
+      if (!opts.dryRun && changed) {
+        const next = this.dropCompactable(memories, Date.now());
+        await this.writeAll(next);
+      }
+      return { outcomes, skippedSuperseded, dryRun: opts.dryRun ?? false };
+    });
   }
 
   /** Recall returns ACTIVE, unexpired memories only — retired/superseded and (soft-)
