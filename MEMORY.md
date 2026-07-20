@@ -3,6 +3,22 @@
 Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
+- **Phase 9 — MCP OAuth shipped (v0.6.0, 2026-07-20; D-034).** Remote mode is now its own
+  OAuth authorization server so claude.ai / the Claude mobile app can add a self-hosted
+  instance (they only speak the OAuth flow, not a static header). Endpoints: RFC 9728
+  protected-resource metadata (+ `WWW-Authenticate: resource_metadata` on `/mcp` 401s), RFC
+  8414 AS metadata (PKCE S256), RFC 7591 dynamic registration, `GET/POST /authorize` (a
+  consent page that asks for `JAMGATE_TOKEN` once → single-use PKCE-bound code), `POST /token`
+  (code+verifier → 90d access token + rotating refresh). `/mcp` accepts an issued token **or**
+  the static `JAMGATE_TOKEN` (Claude Code unaffected). All in `src/oauth/` (store/handlers/
+  authorizePage); on by default (`JAMGATE_OAUTH=off` to disable); state in
+  `~/.jamgate/oauth.json` (hashed secrets, same atomic-write+lock as the store). No new runtime
+  deps. 188 tests (was 163). **Deployed to the droplet** (memory.amirj4m.com): upgraded the
+  `jamgate` user's global npm to 0.6.0, added `JAMGATE_OAUTH_STORE=/var/lib/jamgate/oauth.json`
+  to the systemd unit (home is read-only under `ProtectSystem=strict`), and extended the nginx
+  config to proxy the OAuth paths **and** send `X-Forwarded-Proto`/`-Host` (without it the
+  advertised metadata URLs would be `http://`). Verified live: metadata 200, full round-trip →
+  `/mcp` 200, static-token `/mcp` 200.
 - **Phase: name locked (Jamgate, D-017); MVP skeleton scaffolded.**
 - Code skeleton present: `package.json`, `tsconfig.json`, `.gitignore`, and `src/`
   (`index.ts` MCP server over stdio; `store/fileStore.ts` flat-JSON store with
