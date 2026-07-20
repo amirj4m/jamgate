@@ -262,20 +262,13 @@ the service URL with `/mcp` appended (e.g. `https://jamgate-xxxx.onrender.com/mc
 
 ### Deploy on Railway
 
-Railway deploys need a *published template* to auto-generate the token and attach the volume —
-that's a one-time step in the maintainer's Railway workspace, so the button below is **not live
-yet**. [`railway.json`](./railway.json) already pins the Dockerfile build and the `/healthz`
-check, so a manual "deploy from repo" works now; the one-click button lands once the template is
-published.
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Nb49HE)
 
-<!-- After publishing the template, paste its code and enable this button:
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/TEMPLATE_CODE)
--->
-
-*Maintainer steps to make the button live (one time):* create a project from this repo on
-Railway → add a **Volume** mounted at `/data` → add a variable `JAMGATE_TOKEN` with a generated
-value (`${{ secret(32) }}`) → **Settings → Generate Template from Project** → publish, then paste
-the resulting `railway.com/new/template/<code>` URL into the button markdown above.
+The button deploys the published template: it builds the image from the [`Dockerfile`](./Dockerfile)
+(pinned via [`railway.json`](./railway.json) with the `/healthz` check), **generates a random
+`JAMGATE_TOKEN` for you**, and attaches a persistent volume at `/data` for your memory. After it
+goes live, read your token under **Variables**, and your URL is the service domain with `/mcp`
+appended (e.g. `https://jamgate-xxxx.up.railway.app/mcp`).
 
 ### Get your URL and token, then connect your devices
 
