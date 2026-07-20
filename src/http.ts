@@ -11,6 +11,8 @@ import type { MemoryStore } from "./store/types.js";
 import { VERSION } from "./version.js";
 import { createServer } from "./index.js";
 import { resolveGateLogConfig, type GateLogConfig } from "./gate/log.js";
+import type { OAuthStore } from "./oauth/store.js";
+import { handleOAuth, resourceMetadataUrl } from "./oauth/handlers.js";
 
 /**
  * Optional REMOTE mode for Jamgate (Phase 5, D-029).
@@ -103,6 +105,17 @@ export function bearerTokenMatches(
   return timingSafeEqual(presented, expected);
 }
 
+/** Pull the raw token out of an `Authorization: Bearer <token>` header, or undefined if the
+ *  header is missing or not a Bearer credential. Used to hand OAuth access tokens to the store
+ *  for validation (the static-token path uses the constant-time {@link bearerTokenMatches}). */
+export function extractBearerToken(authorizationHeader: string | undefined): string | undefined {
+  if (!authorizationHeader) return undefined;
+  const prefix = "Bearer ";
+  if (!authorizationHeader.startsWith(prefix)) return undefined;
+  const token = authorizationHeader.slice(prefix.length).trim();
+  return token.length > 0 ? token : undefined;
+}
+
 export interface HttpServerOptions {
   /** The shared store. ALL HTTP sessions write through this one instance; the Phase 2 file
    *  lock + re-read-before-write make concurrent saves from multiple sessions safe. */
@@ -118,6 +131,11 @@ export interface HttpServerOptions {
   /** Gate-decision log config, forwarded to each session's server (D-025). Defaults to the
    *  env-resolved config; tests pass a disabled config to avoid touching `~/.jamgate`. */
   gateLog?: GateLogConfig;
+  /** OAuth authorization-server state (D-034). When provided, the instance also serves the MCP
+   *  OAuth flow (metadata, /register, /authorize, /token) so it can be added to claude.ai / the
+   *  Claude mobile app, and /mcp accepts issued access tokens in addition to the static token.
+   *  When omitted, behaviour is exactly as before: static-token-only, no OAuth endpoints. */
+  oauth?: OAuthStore;
 }
 
 export interface RunningHttpServer {
@@ -146,7 +164,7 @@ export function startHttpServer(opts: HttpServerOptions): Promise<RunningHttpSer
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
   const httpServer = createHttpServer((req, res) => {
-    handleRequest(req, res, { store: opts.store, token: opts.token, path, transports, gateLog }).catch(
+    handleRequest(req, res, { store: opts.store, token: opts.token, path, transports, gateLog, oauth: opts.oauth }).catch(
       (err) => {
         console.error("jamgate http: unhandled request error:", err);
         if (!res.headersSent) {
@@ -190,6 +208,7 @@ interface RequestContext {
   path: string;
   transports: Map<string, StreamableHTTPServerTransport>;
   gateLog: GateLogConfig;
+  oauth?: OAuthStore;
 }
 
 async function handleRequest(
@@ -216,10 +235,31 @@ async function handleRequest(
     return;
   }
 
-  // 1. Auth gate — before anything else, on every method. A missing/wrong token is a flat
-  //    401; we never fall through to session handling for an unauthenticated request.
-  if (!bearerTokenMatches(req.headers.authorization, ctx.token)) {
-    res.setHeader("WWW-Authenticate", 'Bearer realm="jamgate"');
+  // 1. OAuth endpoints (D-034). When OAuth is enabled, the discovery/registration/authorize/
+  //    token endpoints are served BEFORE the bearer gate — they are the path by which a client
+  //    (claude.ai, Claude mobile) obtains a token in the first place. They never touch memory.
+  if (ctx.oauth) {
+    const handled = await handleOAuth(req, res, { oauth: ctx.oauth, staticToken: ctx.token, mcpPath: ctx.path });
+    if (handled) return;
+  }
+
+  // 2. Auth gate — before anything else on the MCP endpoint, on every method. A request is
+  //    authorized if it carries EITHER the static instance token (backward compatible: existing
+  //    Claude Code connections keep working) OR an OAuth access token this instance issued. A
+  //    missing/wrong credential is a flat 401; we never fall through to session handling.
+  const staticOk = bearerTokenMatches(req.headers.authorization, ctx.token);
+  let oauthOk = false;
+  if (!staticOk && ctx.oauth) {
+    const presented = extractBearerToken(req.headers.authorization);
+    oauthOk = presented !== undefined && (await ctx.oauth.verifyAccessToken(presented)) !== null;
+  }
+  if (!staticOk && !oauthOk) {
+    // Per RFC 9728 §5.1, point unauthenticated MCP clients at the protected-resource metadata so
+    // they can discover the OAuth flow. Only advertise it when OAuth is actually enabled.
+    const wwwAuth = ctx.oauth
+      ? `Bearer realm="jamgate", resource_metadata="${resourceMetadataUrl(req)}"`
+      : 'Bearer realm="jamgate"';
+    res.setHeader("WWW-Authenticate", wwwAuth);
     sendJson(res, 401, {
       jsonrpc: "2.0",
       error: { code: -32001, message: "Unauthorized: valid bearer token required" },
@@ -228,8 +268,8 @@ async function handleRequest(
     return;
   }
 
-  // 2. Past the auth gate, only the MCP endpoint exists (the unauthenticated `/healthz` was
-  //    already handled in step 0). Everything else is 404.
+  // 3. Past the auth gate, only the MCP endpoint exists (the unauthenticated `/healthz` and the
+  //    OAuth endpoints were already handled above). Everything else is 404.
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   if (url.pathname !== ctx.path) {
     sendJson(res, 404, {

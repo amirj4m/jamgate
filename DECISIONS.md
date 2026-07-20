@@ -408,3 +408,67 @@ body as mid-creation and ages the lock out by its **mtime** instead of a phantom
 fresh lock is never stolen while a genuinely abandoned one still recovers after `staleMs`. Proven
 by 15 consecutive green runs of the HTTP test and a ~1-3%→0 flake rate over 200+ trials, and
 pinned by deterministic `isStale` unit tests. Phase 8.
+
+## Phase 9 — MCP OAuth: add your instance to claude.ai and the Claude mobile app
+
+### D-034 — Jamgate is its own OAuth authorization server; the instance token is the one credential
+Remote mode (D-029) shipped with a single static bearer token: every request to `/mcp` must carry
+`Authorization: Bearer <JAMGATE_TOKEN>`. That works for Claude Code (you set the header yourself)
+but **fails for the two clients most people actually want on the go** — claude.ai and the Claude
+mobile app. Those clients don't accept a static token in a config field; they only speak the
+[MCP authorization flow](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+(OAuth 2.1 + PKCE, discovered via RFC 9728 / RFC 8414, with RFC 7591 dynamic client
+registration). Adding a personal instance as a custom connector drove the client to
+`GET https://<host>/authorize?response_type=code&client_id=…`, which 404'd — Jamgate had no OAuth
+surface at all. So a whole class of "share one memory across my devices" (the entire point of
+remote mode) was blocked in practice.
+
+**Decision: implement the MCP OAuth flow *in Jamgate itself*, with no external identity provider.**
+One instance = one human (D-029), so bolting on Auth0/Keycloak/etc. would be both overkill and a
+betrayal of the local-first, self-hosted promise (D-010): it would add a runtime dependency, a
+second service to run, and a third party in the trust path. Instead the instance acts as **its own
+authorization server on the same origin as the resource server**, and the existing
+`JAMGATE_TOKEN` stays the *single* credential — the OAuth flow is just a standard, client-friendly
+way to prove you hold that token and to mint per-client access tokens from it. No new runtime
+dependencies: Node's `crypto` + the existing `node:http` layer only.
+
+**What the spec required (verified against the 2025-06-18 spec), and what we serve:**
+- **RFC 9728 protected resource metadata** — `GET /.well-known/oauth-protected-resource` returns
+  `{ resource, authorization_servers: [<this origin>] }`, and a `401` from `/mcp` now includes
+  `WWW-Authenticate: Bearer realm="jamgate", resource_metadata="…/.well-known/oauth-protected-resource"`
+  so an unauthenticated client discovers the flow. The path-suffixed variant
+  (`/.well-known/oauth-protected-resource/mcp`) resolves to the same document.
+- **RFC 8414 AS metadata** — `GET /.well-known/oauth-authorization-server` advertises the
+  `authorization`/`token`/`registration` endpoints, `response_types_supported: ["code"]`,
+  `grant_types_supported: ["authorization_code","refresh_token"]`, and
+  `code_challenge_methods_supported: ["S256"]` (PKCE S256 is mandatory; `plain` is rejected).
+- **RFC 7591 dynamic client registration** — `POST /register` accepts `redirect_uris`
+  (validated: HTTPS or loopback only) + optional `client_name`, mints a public `client_id`
+  (`token_endpoint_auth_method: "none"` — PKCE public clients, no client secret), and persists it.
+- **`GET`/`POST /authorize`** — the one HTML page in the whole project: a self-contained, on-brand
+  consent screen that asks the user to paste their instance token *once* ("This is your Jamgate
+  instance. Enter your instance token to authorize this client."). The token is verified
+  constant-time; on success we mint a single-use authorization code bound to
+  `client_id + redirect_uri + PKCE challenge`; a wrong token re-renders the page with an error
+  instead of failing the flow.
+- **`POST /token`** — exchanges `code + code_verifier` for a long-lived (90d) access token and a
+  rotating refresh token; also handles `grant_type=refresh_token` with refresh-token rotation
+  (the OAuth 2.1 public-client rule).
+
+**`/mcp` now accepts EITHER credential** — an issued OAuth access token **or** the static
+`JAMGATE_TOKEN` — so existing Claude Code connections are completely unaffected (backward-compat
+was a hard requirement, tested). OAuth is **on by default** in remote mode (`--http`); set
+`JAMGATE_OAUTH=off` to run static-token-only.
+
+**Security posture (all tested):** PKCE S256 required; `redirect_uri` matched **exactly** against
+the client's registration, and an unregistered/forged `redirect_uri` renders an on-page error
+rather than 302-ing to it (no open redirect / no phishing hop); authorization codes are
+single-use (consumed unconditionally on presentation, so a bad verifier can't be retried and a
+replay finds nothing) and expire in ≤60s; **secrets are hashed at rest** — auth codes, access
+tokens and refresh tokens are stored only as their SHA-256 digest in `~/.jamgate/oauth.json`
+(`JAMGATE_OAUTH_STORE`), so a leaked file can't be replayed, and revoking a token is deleting its
+entry. All OAuth state uses the *same* atomic temp-file+fsync+rename write and the *same*
+cross-process `withFileLock` as the memory store (D-020..D-023), re-reading fresh inside the lock;
+the file self-prunes expired codes/tokens on every write. The public base URL for the advertised
+endpoints is derived from the reverse proxy's `X-Forwarded-Proto`/`X-Forwarded-Host` so the
+metadata points at the externally-reachable HTTPS URL, not the localhost bind. Phase 9.

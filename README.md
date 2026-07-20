@@ -191,6 +191,8 @@ All configuration is via environment variables; every one has a sensible default
 | `JAMGATE_PORT` | `8420` | Port for remote mode (same as `--port`). |
 | `JAMGATE_HOST` | `127.0.0.1` | Interface to bind in remote mode. Keep it on localhost behind a reverse proxy. |
 | `JAMGATE_TOKEN` | — | Bearer token required in remote mode. The server refuses to start without it. |
+| `JAMGATE_OAUTH` | on | In remote mode, serve the [MCP OAuth flow](#adding-to-claudeai-mcp-oauth) so claude.ai / the Claude app can connect. `off` disables it (static-token-only). |
+| `JAMGATE_OAUTH_STORE` | `~/.jamgate/oauth.json` | Path to the OAuth state file (registered clients + hashed tokens). |
 
 ## Backup & migration
 
@@ -317,7 +319,9 @@ jamgate --http                 # listens on 127.0.0.1:8420/mcp
 ```
 
 The MCP endpoint is `/mcp`. Every request must carry `Authorization: Bearer <token>`; anything
-else gets a `401`.
+else gets a `401`. In remote mode Jamgate also serves the standard **MCP OAuth flow** (on by
+default) so it can be added to claude.ai and the Claude mobile app — see
+[Adding to claude.ai](#adding-to-claudeai-mcp-oauth).
 
 ### Security model
 
@@ -331,6 +335,10 @@ else gets a `401`.
   internet is a leaked token — **always** run it behind TLS.
 - **Your server, your data.** The store is still a flat file on a disk you own. No Jamgate cloud,
   no third party, no telemetry. "Self-hosted" means exactly that.
+- **OAuth without an identity provider.** For clients that require OAuth (claude.ai, the Claude
+  app), your instance is its own authorization server — your `JAMGATE_TOKEN` is still the only
+  credential, PKCE is enforced, and issued tokens are stored hashed and revocable. Details in
+  [Adding to claude.ai](#adding-to-claudeai-mcp-oauth).
 
 ### Deploy: systemd + Caddy
 
@@ -396,9 +404,14 @@ server {
 Point every agent at `https://your-domain/mcp` with the token.
 
 **Claude app (iOS / Android / desktop) and claude.ai** — Settings → Connectors → *Add custom
-connector* → URL `https://your-domain/mcp`, and provide the bearer token when asked. Once
-connected, the same three tools (`save_memory`, `recall_memory`, `forget_memory`) are available
-from your phone and browser.
+connector* → paste the URL `https://your-domain/mcp` and click through. These clients only speak
+the standard **MCP OAuth flow**, so instead of pasting a token into a config field, a Jamgate
+page opens in your browser and asks: *"This is your Jamgate instance. Enter your instance token
+to authorize this client."* Paste your `JAMGATE_TOKEN` **once**, and Claude is connected — it
+remembers the authorization, so you won't be asked again for that client. Once connected, the
+same three tools (`save_memory`, `recall_memory`, `forget_memory`) are available from your phone
+and browser. See [Adding to claude.ai](#adding-to-claudeai-mcp-oauth) below for what happens under
+the hood.
 
 **Claude Code** — add it as an HTTP MCP server:
 
@@ -409,6 +422,41 @@ claude mcp add --transport http jamgate https://your-domain/mcp \
 
 **Any MCP client** that speaks Streamable HTTP works the same way: URL `https://your-domain/mcp`,
 header `Authorization: Bearer <token>`.
+
+### Adding to claude.ai (MCP OAuth)
+
+claude.ai and the Claude mobile app cannot take a static token in a config field — they only
+support the [MCP authorization flow](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+(OAuth 2.1 + PKCE). Jamgate implements that flow itself in remote mode, so **no external identity
+provider is involved** — your instance *is* the authorization server, and your `JAMGATE_TOKEN` is
+the one credential. It's **on by default** whenever you run `--http` (disable with
+`JAMGATE_OAUTH=off` if you only ever use Claude Code with a static header).
+
+What you do:
+
+1. In claude.ai (or the app): Settings → Connectors → *Add custom connector* → URL
+   `https://your-domain/mcp`.
+2. Claude discovers the flow, registers itself, and opens a Jamgate page in your browser.
+3. The page asks for your **instance token** — paste your `JAMGATE_TOKEN` and submit. That's the
+   only thing it ever asks for, and only once per client.
+4. You're connected. `save_memory` / `recall_memory` / `forget_memory` now work from that client.
+
+What happens under the hood (all served by your instance, same origin, no third party):
+
+| Endpoint | Spec | Purpose |
+| --- | --- | --- |
+| `GET /.well-known/oauth-protected-resource` | [RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728) | Tells the client where the authorization server is. A `401` from `/mcp` also carries a `WWW-Authenticate` header pointing here. |
+| `GET /.well-known/oauth-authorization-server` | [RFC 8414](https://datatracker.ietf.org/doc/html/rfc8414) | Advertises the endpoints below; PKCE **S256** required. |
+| `POST /register` | [RFC 7591](https://datatracker.ietf.org/doc/html/rfc7591) | Dynamic client registration — the client gets a `client_id`. |
+| `GET`/`POST /authorize` | OAuth 2.1 | The consent page that asks for your instance token, then issues a single-use, PKCE-bound authorization code. |
+| `POST /token` | OAuth 2.1 | Exchanges the code (+ PKCE verifier) for a long-lived access token (and a refresh token). |
+
+Security: PKCE (S256) is mandatory, redirect URIs are matched exactly (no open redirect),
+authorization codes are single-use and expire in ≤60s, and access/refresh tokens are stored
+**hashed** in `~/.jamgate/oauth.json` (revoke one by deleting its entry) with the same atomic,
+locked writes as the memory store. The `/mcp` endpoint accepts **either** an issued OAuth access
+token **or** the static `JAMGATE_TOKEN`, so existing Claude Code connections keep working
+unchanged.
 
 ### Honest limits (read this)
 

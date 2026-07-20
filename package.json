@@ -1,6 +1,6 @@
 {
   "name": "jamgate",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "mcpName": "io.github.amirj4m/jamgate",
   "description": "A neutral, cross-agent memory quality gate for AI agents, delivered as an MCP server — a gate, not a store.",
   "keywords": [

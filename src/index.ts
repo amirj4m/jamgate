@@ -11,6 +11,7 @@ import { VERSION } from "./version.js";
 import { FileStore } from "./store/fileStore.js";
 import { loadTransformersEmbedder, resolveDupThreshold } from "./embeddings/embedder.js";
 import { parseCliOptions, startHttpServer } from "./http.js";
+import { OAuthStore } from "./oauth/store.js";
 import { setupCommand, statusCommand } from "./setup/cli.js";
 import { exportCommand, importCommand } from "./backup/cli.js";
 import type { ClientInfo, MemoryStore } from "./store/types.js";
@@ -262,10 +263,18 @@ async function main() {
       );
       process.exit(1);
     }
-    const running = await startHttpServer({ store, token, port: opts.port });
+    // MCP OAuth (D-034) is on by default in remote mode so the instance can be added to
+    // claude.ai / the Claude mobile app, which only speak the OAuth flow. The static token keeps
+    // working (existing Claude Code connections are unaffected). Opt out with JAMGATE_OAUTH=off.
+    const oauthDisabled = ["off", "none", "0", "false"].includes(
+      (process.env.JAMGATE_OAUTH ?? "").trim().toLowerCase(),
+    );
+    const oauth = oauthDisabled ? undefined : new OAuthStore();
+    const running = await startHttpServer({ store, token, port: opts.port, oauth });
     console.error(
       `jamgate MCP server running on http://${running.host}:${running.port}${running.path} ` +
-        "(bearer auth required; terminate TLS at a reverse proxy)",
+        "(bearer auth required; terminate TLS at a reverse proxy)" +
+        (oauth ? "\njamgate: MCP OAuth enabled — add this instance to claude.ai and enter your token when prompted" : ""),
     );
     return;
   }

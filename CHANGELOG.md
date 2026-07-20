@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-20
+
+MCP OAuth for remote mode: a self-hosted Jamgate instance can now be added to **claude.ai** and
+the **Claude mobile app** as a custom connector. Those clients only speak the standard MCP
+authorization flow (OAuth 2.1 + PKCE) — they can't take a static bearer token — so Jamgate now
+implements that flow itself, acting as its own authorization server with your `JAMGATE_TOKEN` as
+the one credential. No external identity provider, no new runtime dependencies (see DECISIONS
+D-034).
+
+### Added
+
+- **MCP OAuth flow in remote mode**, on by default whenever `--http`/`JAMGATE_HTTP` is set
+  (disable with `JAMGATE_OAUTH=off`). Implements the subset of the
+  [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+  a claude.ai connector requires:
+  - `GET /.well-known/oauth-protected-resource` — RFC 9728 protected-resource metadata pointing
+    at this origin's authorization server. A `401` from `/mcp` now carries a `WWW-Authenticate`
+    header with `resource_metadata=` so clients discover the flow.
+  - `GET /.well-known/oauth-authorization-server` — RFC 8414 metadata advertising the endpoints,
+    PKCE **S256** required, `authorization_code` + `refresh_token` grants.
+  - `POST /register` — RFC 7591 dynamic client registration; persists `client_id`/`redirect_uris`.
+  - `GET`/`POST /authorize` — a minimal, self-contained consent page that asks for your instance
+    token **once**, verifies it constant-time, and issues a single-use, PKCE-bound authorization
+    code (≤60s).
+  - `POST /token` — PKCE code exchange → long-lived (90d) access token + rotating refresh token.
+- **`/mcp` accepts either credential** — an issued OAuth access token **or** the static
+  `JAMGATE_TOKEN`, so existing Claude Code connections keep working unchanged.
+- **`JAMGATE_OAUTH`** (default on) and **`JAMGATE_OAUTH_STORE`** (default `~/.jamgate/oauth.json`)
+  configuration variables.
+- **25 new tests** covering the metadata shapes, dynamic registration, the full
+  authorize→token→`/mcp` round-trip with real PKCE, code single-use / reuse rejection, wrong-token
+  rejection, refresh-token rotation, the `WWW-Authenticate` pointer, and static-token backward
+  compatibility.
+
+### Security
+
+- PKCE (S256) is mandatory; redirect URIs are matched **exactly** (no open redirect — an
+  unregistered `redirect_uri` renders an error page rather than redirecting); authorization codes
+  are single-use and expire in ≤60s; access and refresh tokens are stored **hashed** (SHA-256) in
+  `oauth.json` and revoked by deleting the entry. All OAuth state uses the same atomic-write +
+  file-lock discipline as the memory store. No new runtime dependencies — Node `crypto` + the
+  existing HTTP layer only.
+
 ## [0.5.0] - 2026-07-20
 
 Backup & migration: `jamgate export` and `jamgate import` so you can back up your memory, move
