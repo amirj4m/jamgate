@@ -6,7 +6,10 @@ describe("prefilter (gate layer 1)", () => {
   it("rejects text shorter than the minimum length", () => {
     const verdict = prefilter("hm");
     assert.equal(verdict.ok, false);
-    assert.equal(verdict.reason, "too short");
+    // The reason states the ACTUAL length: a bare "too short" was reported to a user for a
+    // memory they believed was 1700 characters, and gave them no way to see it never
+    // arrived (D-037).
+    assert.equal(verdict.reason, "too short (2 characters, minimum 4)");
   });
 
   it("rejects whitespace-only text as too short", () => {

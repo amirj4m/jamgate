@@ -56,7 +56,18 @@ const DEFAULT_MAX_TEXT_CHARS = 500;
 export function resolveGateLogConfig(env: NodeJS.ProcessEnv = process.env): GateLogConfig {
   const raw = env.JAMGATE_GATE_LOG?.trim();
   const disabled = raw !== undefined && ["off", "none", "0", ""].includes(raw.toLowerCase());
-  const path = disabled ? null : raw && raw.length > 0 ? raw : DEFAULT_PATH;
+  // The log belongs NEXT TO THE STORE. Defaulting to the home directory broke every
+  // hardened deployment: under systemd `ProtectHome=true` / `ProtectSystem=strict` the
+  // service cannot write `~/.jamgate`, so every append failed and the audit trail was
+  // silently empty — exactly when a production bug needed it (D-037). Follow JAMGATE_STORE
+  // when it is set; an explicit JAMGATE_GATE_LOG still wins over both.
+  const path = disabled
+    ? null
+    : raw && raw.length > 0
+      ? raw
+      : env.JAMGATE_STORE
+        ? join(dirname(env.JAMGATE_STORE), "gate.log")
+        : DEFAULT_PATH;
 
   const maxBytesRaw = Number(env.JAMGATE_GATE_LOG_MAX_BYTES);
   const maxBytes =

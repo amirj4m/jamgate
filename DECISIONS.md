@@ -532,3 +532,35 @@ before, so this is additive: nothing that used to be found stops being found. Se
 genuine synonyms remains the optional embedding layer's job (D-026); this is about not throwing
 away structure we already have. Regression tests pin the original miss end-to-end through the
 store, not just at the unit level.
+
+### D-037 — Validate the argument before judging the memory; a usage error is not a verdict
+Reported from real use: an agent saved to a remote instance and *"the gate rejected everything
+with 'too short' — even a ~1700-character memory."* Reproduced over the live HTTP path in three
+steps, and it was never the gate's judgement — the text had simply never arrived.
+
+`save_memory` did `String(args.text ?? "")`. A missing or misnamed `text` collapsed to `""`, the
+prefilter dutifully answered **"too short"**, and the caller was told something demonstrably false
+about a memory it knew was long. Worse, a client that wrapped the memory in a content block
+(`text: { type: "text", text: "…" }`) stringified to the literal **`"[object Object]"`** — which
+sailed through the gate and was *saved*, with a success message. One bug made a good call look
+rejected; the other made a broken call look accepted.
+
+Three fixes, and the shape of them is the point:
+1. **Validate the argument first.** A missing, empty or non-string `text` returns an MCP error
+   result (`isError: true`) naming the required field **and the keys that actually arrived** —
+   `received keys: content, type` — so an agent can correct itself without a human debugging the
+   wire. It is not written to the gate log: a client mismatch is not a memory judgement, and
+   logging it as `rejected` would poison the classifier's training data with non-memories.
+2. **Never report an unfalsifiable reason.** The prefilter's verdict now carries the measured
+   length ("too short (2 characters, minimum 4)"). A caller can compare that against what it sent
+   and see the discrepancy immediately, which is precisely what the bare message denied the user.
+3. **Put the gate log where the service can write it.** The default was `~/.jamgate/gate.log`;
+   under systemd `ProtectHome=true` / `ProtectSystem=strict` every append had been failing with
+   ENOENT, so the audit trail was empty **exactly when a production bug needed it** — the evidence
+   for this incident had to be reconstructed by re-running the client instead. The log now
+   defaults next to the store (following `JAMGATE_STORE`), which is where the comments always
+   claimed it lived; an explicit `JAMGATE_GATE_LOG` still wins.
+
+The general rule this encodes: the gate answers "is this worth remembering?" — it must never be
+handed a question it cannot answer and made to guess. Malformed input gets a straight answer about
+the input. Phase 10.

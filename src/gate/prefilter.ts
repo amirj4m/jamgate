@@ -13,9 +13,20 @@ export interface Verdict {
   reason?: string;
 }
 
+/** Shortest text that can carry a durable fact. Below this it is a fragment, not a memory. */
+export const MIN_TEXT_LENGTH = 4;
+
 export function prefilter(text: string): Verdict {
   const t = text.trim();
-  if (t.length < 4) return { ok: false, reason: "too short" };
+  // Report the actual length. "too short" on its own is unfalsifiable from the caller's
+  // side — it was reported for a memory the agent believed was 1700 characters (the text
+  // had in fact never arrived, D-037), and the bare message gave no way to see that.
+  if (t.length < MIN_TEXT_LENGTH) {
+    return {
+      ok: false,
+      reason: `too short (${t.length} characters, minimum ${MIN_TEXT_LENGTH})`,
+    };
+  }
   if (PLEASANTRIES.has(t.toLowerCase())) {
     return { ok: false, reason: "pleasantry / no durable content" };
   }

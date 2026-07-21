@@ -111,7 +111,41 @@ export function createServer(
     const args = (req.params.arguments ?? {}) as Record<string, unknown>;
 
     if (name === "save_memory") {
-      const text = String(args.text ?? "");
+      // Validate the ARGUMENT before judging the MEMORY (D-037). A missing, misnamed or
+      // non-string `text` is a tool-usage error, not a verdict about the content — and
+      // `String(args.text ?? "")` used to turn it into `""` (reported back as the absurd
+      // "too short" for a memory the agent believed was 1700 characters) or, worse, into the
+      // literal "[object Object]" when a client wrapped the text in a content block. Say
+      // exactly what is wrong and what arrived, so the caller can correct itself.
+      const rawText = args.text;
+      if (typeof rawText !== "string" || rawText.trim() === "") {
+        const keys = Object.keys(args);
+        const received =
+          keys.length === 0
+            ? "no arguments were provided"
+            : `received keys: ${keys.join(", ")}${
+                rawText !== undefined && typeof rawText !== "string"
+                  ? ` ("text" was ${Array.isArray(rawText) ? "an array" : typeof rawText}, not a string)`
+                  : ""
+              }`;
+        // Surfaced on stderr too: on a hardened deployment the gate log may be unwritable,
+        // and this class of client mismatch is invisible without a trace somewhere.
+        console.error(`jamgate: save_memory called without a valid "text" argument — ${received}`);
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text:
+                `save_memory failed: "text" is required and must be a non-empty string — ` +
+                `${received}. Pass the memory itself as a plain string, e.g. ` +
+                `{"text": "jam prefers TypeScript", "type": "preference"}. ` +
+                `Nothing was saved and the gate did not judge this call.`,
+            },
+          ],
+        };
+      }
+      const text = rawText;
       const client = clientInfoFromHandshake();
       const verdict = prefilter(text);
       if (!verdict.ok) {

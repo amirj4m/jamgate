@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-07-21
+
+### Fixed
+
+- **`save_memory` no longer answers "too short" for a memory that never arrived** (DECISIONS
+  D-037). Reported from real use against a remote instance: the gate "rejected everything with
+  'too short' — even a ~1700-character memory". The text argument had not reached the gate;
+  `String(args.text ?? "")` turned a missing or misnamed `text` into `""` and the prefilter judged
+  the empty string. A missing, empty or non-string `text` now returns a proper MCP error result
+  (`isError: true`) that names the required field **and the argument keys that actually arrived**,
+  so a client can correct itself. Nothing is saved, and it is not recorded as a gate decision — a
+  usage error is not a verdict.
+- **A non-string `text` can no longer be stored as `"[object Object]"`.** A client wrapping the
+  memory in a content block (`text: { type: "text", text: "…" }`) previously stringified straight
+  through the gate and was saved, reported as a success.
+- **Rejection reasons now state the measured length** — `too short (2 characters, minimum 4)`
+  instead of a bare `too short`, so a caller can compare it against what it sent.
+- **The gate log defaults next to the store**, following `JAMGATE_STORE`, instead of
+  `~/.jamgate/gate.log`. Under systemd `ProtectHome=true`/`ProtectSystem=strict` every append had
+  been failing with ENOENT, leaving the audit trail empty exactly when a production bug needed it.
+  An explicit `JAMGATE_GATE_LOG` (including `off`) still wins.
+
+
 ## [0.7.1] - 2026-07-21
 
 ### Fixed
@@ -332,7 +355,8 @@ single shared memory clean at write time instead of letting it bloat with junk.
 - Verified end-to-end over the MCP protocol and covered by an automated test suite
   (89 tests) running on Node 20.x and 22.x in CI.
 
-[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/amirj4m/jamgate/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/amirj4m/jamgate/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/amirj4m/jamgate/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/amirj4m/jamgate/compare/v0.5.0...v0.6.0
