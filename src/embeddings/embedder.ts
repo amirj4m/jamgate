@@ -68,10 +68,31 @@ export async function loadTransformersEmbedder(
     };
   } catch (err) {
     // Package missing, model download blocked, or runtime error → degrade to fuzzy recall.
+    //
+    // Name the CAUSE, not just the symptom. The degraded path is silent by design — recall
+    // still works, saves still succeed — so the only evidence that the semantic layer is
+    // missing is this line. When a stress test later shows duplicates slipping through, the
+    // first question is "was the embedder even loaded?", and "unavailable" does not answer
+    // it. A missing peer dependency and a blocked model download need different fixes.
+    const message = (err as Error)?.message ?? String(err);
+    const missingPackage = /Cannot find (package|module)/i.test(message);
     console.error(
-      "jamgate: optional embeddings unavailable, falling back to fuzzy recall:",
-      (err as Error)?.message ?? err,
+      `jamgate: optional embeddings unavailable, falling back to fuzzy recall — ${message}`,
     );
+    if (missingPackage) {
+      console.error(
+        "jamgate:   cause: the optional peer '@huggingface/transformers' is not installed. " +
+          "Semantic near-duplicate detection and synonym recall are OFF until it is. " +
+          "Install it alongside jamgate to enable them.",
+      );
+    } else {
+      console.error(
+        `jamgate:   cause: '${MODEL_ID}' could not be loaded. The model is downloaded on ` +
+          "first use and cached inside the package directory — a sandboxed service (systemd " +
+          "ProtectSystem/ProtectHome) may be unable to write that cache or reach the network. " +
+          "Pre-download the model as the service user, or point HF_HOME at a writable path.",
+      );
+    }
     return null;
   }
 }

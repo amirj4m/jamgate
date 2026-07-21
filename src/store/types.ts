@@ -75,6 +75,18 @@ export interface SaveResult {
   /** The existing near-duplicate(s) (only on action "possible_duplicate"), most similar
    *  first, each annotated with the cosine similarity that triggered the flag. */
   possibleDuplicates?: Array<{ memory: Memory; similarity: number }>;
+  /**
+   * Existing memories that are RELATED to a newly created one — similar enough to be worth
+   * mentioning, not similar enough to refuse (D-045). Present only on action "created".
+   *
+   * This exists because of a measured limit, not a hunch. Two saves about the same tracked
+   * value ("ThinkBook savings 5/10, €640" then "7/10, €768") embed only 0.67 apart — far
+   * below any duplicate threshold that could also keep "uses Windows" and "uses Linux"
+   * apart (0.81). No cosine cutoff separates those populations, so the gate does not try:
+   * it stores the new memory and TELLS the agent what it looks related to, leaving the
+   * decision where the context actually is. A hint can never wrongly retire a fact.
+   */
+  relatedMemories?: Array<{ memory: Memory; similarity: number }>;
 }
 
 /**

@@ -24,6 +24,7 @@ import { memoryRelevance, MIN_RELEVANCE } from "../gate/relevance.js";
 import type { Embedder } from "../embeddings/embedder.js";
 import {
   DEFAULT_DUP_THRESHOLD,
+  DEFAULT_RELATED_MIN,
   DEFAULT_SEMANTIC_MIN,
   blendRelevance,
   cosineSimilarity,
@@ -270,21 +271,40 @@ export class FileStore implements MemoryStore {
           old.updatedAt = now;
         }
       }
-    } else if (candidate.embedding) {
-      // No subject to drive supersession, and this isn't an exact duplicate — check whether
-      // it is a SEMANTIC near-duplicate of something already on file (D-026). If so, don't
-      // store it; hand the existing record back so the agent decides (mirrors "conflict",
-      // never a silent drop). A subject-bearing save intentionally skips this: supplying a
-      // subject signals intent to update, handled by supersession above.
-      const near = this.findNearDuplicates(candidate.embedding, memories);
-      if (near.length > 0) {
-        return { action: "possible_duplicate", memory: candidate, possibleDuplicates: near };
+    }
+
+    // Semantic near-duplicate check (D-026), widened in 0.8.0 (D-044). This isn't an exact
+    // duplicate and nothing was superseded, so the candidate is about to be stored as a NEW
+    // fact — the last chance to notice it is a reworded copy of one we already hold.
+    //
+    // It used to run only for subject-LESS candidates, on the reasoning that supplying a
+    // subject signals intent to update. That reasoning holds when the subject MATCHES
+    // something; it does not hold when it matches nothing. A reworded memory whose subject
+    // was spelled differently (or derived differently) fell through the gap and was stored
+    // as new — the first finding of the 0.8.0 stress test. Running the check whenever
+    // nothing was retired closes the gap without touching supersession: a candidate that
+    // superseded an existing memory never reaches here, so a legitimate update is never
+    // mistaken for a duplicate.
+    let related: Array<{ memory: Memory; similarity: number }> = [];
+    if (retired.length === 0 && candidate.embedding) {
+      const near = this.findSimilar(candidate.embedding, memories, DEFAULT_RELATED_MIN);
+      const duplicates = near.filter((x) => x.similarity >= this.dupThreshold);
+      if (duplicates.length > 0) {
+        return {
+          action: "possible_duplicate",
+          memory: candidate,
+          possibleDuplicates: duplicates,
+        };
       }
+      // Below the duplicate bar but well above unrelated: store it, and say what it
+      // resembles so the agent can decide whether it is really an update (D-045).
+      related = near;
     }
 
     memories.push(candidate);
-    return retired.length > 0
-      ? { action: "superseded", memory: candidate, retired }
+    if (retired.length > 0) return { action: "superseded", memory: candidate, retired };
+    return related.length > 0
+      ? { action: "created", memory: candidate, relatedMemories: related }
       : { action: "created", memory: candidate };
   }
 
@@ -418,17 +438,18 @@ export class FileStore implements MemoryStore {
     return memories.filter((m) => !isCompactable(m.expiresAt, nowMs, this.graceMs));
   }
 
-  /** Active memories whose embedding is at/above the near-duplicate threshold to `vec`,
-   *  most similar first. Records without an embedding (older/pre-embedding saves) are
-   *  simply skipped — they can't be compared, and we never guess a near-match (D-026). */
-  private findNearDuplicates(
+  /** Active memories whose embedding is at/above `floor` similarity to `vec`, most similar
+   *  first. Records without an embedding (older/pre-embedding saves) are simply skipped —
+   *  they can't be compared, and we never guess a near-match (D-026). */
+  private findSimilar(
     vec: number[],
     memories: Memory[],
+    floor: number,
   ): Array<{ memory: Memory; similarity: number }> {
     return memories
       .filter((m) => m.status === "active" && Array.isArray(m.embedding))
       .map((m) => ({ memory: m, similarity: cosineSimilarity(vec, m.embedding as number[]) }))
-      .filter((x) => x.similarity >= this.dupThreshold)
+      .filter((x) => x.similarity >= floor)
       .sort((a, b) => b.similarity - a.similarity);
   }
 }
