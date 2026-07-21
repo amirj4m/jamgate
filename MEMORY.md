@@ -3,6 +3,22 @@
 Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
+- **0.7.1 — recall scores subject + type, not just text (2026-07-21; D-036).** A live desktop
+  chat asked for "my projects" and got "No matching memories" while the store held a
+  `type: project` / `subject: jamgate-project` record whose TEXT never used the word. Recall now
+  uses `memoryRelevance(query, memory)`: text + the subject's words (hyphenated keys split into
+  words, weighted like text tokens) + a small `TYPE_BOOST = 0.15` when the query names the type
+  (above `MIN_RELEVANCE`, below any real word match). Additive — no subject/type scores exactly
+  as before. 217 tests. Published; droplet on 0.7.1.
+- **Droplet embeddings (2026-07-21):** `@huggingface/transformers` is now installed for the
+  `jamgate` user and the service logs `semantic embeddings active`. A plain install is
+  **OOM-killed** on this 458 MB box while extracting onnxruntime's CUDA provider — use
+  `ONNXRUNTIME_NODE_INSTALL_CUDA=skip`. **Two limits found, both still open:** embeddings attach
+  at SAVE time only, so every pre-existing record has no vector and is invisible to semantic
+  recall/near-dup until re-saved (a `jamgate reindex`/backfill is needed); and
+  `DEFAULT_SEMANTIC_MIN = 0.5` is above what real paraphrase pairs score on this model (measured
+  0.395 for the README's own "automobile" ~ "car" example, 0.292 for "my car"), so semantic
+  recall rarely fires. Needs an evidence-based threshold, not a guess.
 - **Phase 10 — "Bring your memory with you" shipped (v0.7.0, 2026-07-21; D-035).**
   `jamgate import --from claude|chatgpt <path>` parses another product's memory export and
   replays it through the SAME gate as a live save (never a blind append); `--dry-run` works;
