@@ -3,6 +3,24 @@
 Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
+- **Phase 10 — "Bring your memory with you" shipped (v0.7.0, 2026-07-21; D-035).**
+  `jamgate import --from claude|chatgpt <path>` parses another product's memory export and
+  replays it through the SAME gate as a live save (never a blind append); `--dry-run` works;
+  plain `jamgate import <file>` (native format) untouched. **Format research (July 2026, this
+  is the non-obvious bit): NEITHER vendor's bulk account data export contains memory entries.**
+  Claude's export = conversations + account data; ChatGPT's = `conversations.json`, `chat.html`,
+  `user.json`, `message_feedback.json`, `model_comparisons.json`. Both keep memory in the app's
+  own settings UI with a copy-out path (Claude: Settings → Capabilities → "View and edit your
+  memory"; ChatGPT: Settings → Personalization → Memory → Manage), and Anthropic's documented
+  memory-transfer shape is `[date saved, if available] - memory content`. So the primary parser
+  is a **text/markdown line parser** (verified format); the JSON path is explicitly best-effort
+  and fails loudly. Accepts the .zip / extracted folder / single file — `src/backup/zip.ts` is a
+  ~100-line dependency-free zip reader (STORE + DEFLATE via `node:zlib`). **Conversation logs
+  are never mined** (skipped by name and reported). Mapping: `source: user-confirmed`, type only
+  when obvious (`preference`/`identity`, else untyped), original timestamps preserved, subject
+  via `deriveSubject`, provenance `import:claude.ai` / `import:chatgpt`. 211 tests (was 188).
+  Published to npm and **deployed to the droplet** (memory.amirj4m.com → `/healthz` 0.7.0,
+  static-token `/mcp` 200, unauthenticated 401).
 - **Phase 9 — MCP OAuth shipped (v0.6.0, 2026-07-20; D-034).** Remote mode is now its own
   OAuth authorization server so claude.ai / the Claude mobile app can add a self-hosted
   instance (they only speak the OAuth flow, not a static header). Endpoints: RFC 9728
