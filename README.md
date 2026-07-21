@@ -152,7 +152,8 @@ Restart the agent. It now has three tools:
   `operating-system` so a newer fact retires the older one — or let the gate derive one),
   and refers trust conflicts back to you.
 - **`recall_memory`** — fetch what's known, relevant to a query (active facts only).
-- **`forget_memory`** — delete a memory by id.
+- **`forget_memory`** — delete a memory by the id `recall_memory` printed (the full id, or an
+  unambiguous prefix of 8+ characters).
 
 Your memory lives in `~/.jamgate/memory.json`. Same machine, every agent → one shared
 memory. To share one memory across **different** machines and your phone, see

@@ -78,11 +78,21 @@ export interface SaveResult {
 }
 
 /**
+ * Outcome of a forget. Richer than a boolean because an id PREFIX may resolve to more than
+ * one memory (D-041) — the caller has to tell the agent apart from "no such memory".
+ */
+export type ForgetResult =
+  | { ok: true; id: string }
+  | { ok: false; reason: "not-found" }
+  | { ok: false; reason: "ambiguous"; matches: string[] };
+
+/**
  * The storage adapter contract. Any backend — flat file (today), SQLite, or a hosted
  * Supabase store (v2, see D-019) — implements this. Swapping stores is a drop-in.
  */
 export interface MemoryStore {
   save(input: SaveInput): Promise<SaveResult>;
   recall(query: string, limit?: number, includeSuperseded?: boolean): Promise<Memory[]>;
-  forget(id: string): Promise<boolean>;
+  /** Accepts a full id or an unambiguous id prefix of at least 8 characters (D-041). */
+  forget(idOrPrefix: string): Promise<ForgetResult>;
 }

@@ -2,7 +2,14 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Memory, MemorySource, MemoryStore, SaveInput, SaveResult } from "./types.js";
+import type {
+  ForgetResult,
+  Memory,
+  MemorySource,
+  MemoryStore,
+  SaveInput,
+  SaveResult,
+} from "./types.js";
 import { CURRENT_SCHEMA_VERSION, migrate, type StoreFile } from "./schema.js";
 import {
   computeExpiresAt,
@@ -21,6 +28,24 @@ import {
   blendRelevance,
   cosineSimilarity,
 } from "../embeddings/vector.js";
+
+/** Shortest id prefix `forget` will resolve. A v4 UUID's first 8 hex characters are
+ *  ~4 billion apart; anything shorter is a typo risk, not a shorthand (D-041). */
+const MIN_ID_PREFIX = 8;
+
+/** Strip what an LLM tends to carry along when it copies an id out of a recall listing:
+ *  surrounding whitespace, quotes/backticks/brackets, an "id:" label, and trailing
+ *  sentence punctuation. Lowercased, since ids are lowercase UUIDs. */
+function normalizeId(raw: string): string {
+  const labelled = raw.trim().replace(/^["'`([<]*\s*id\s*[:=]\s*/i, "");
+  // Ids are lowercase hex and hyphens, so anything else on either end is copy noise —
+  // quotes, backticks, brackets, a trailing comma or period. Trim by character class
+  // rather than by a list of delimiters, which order-dependent stripping gets wrong.
+  return labelled
+    .toLowerCase()
+    .replace(/^[^0-9a-f]+/, "")
+    .replace(/[^0-9a-f]+$/, "");
+}
 
 /** How much we trust a memory by where it came from. A lower-trust source must not
  *  silently overwrite a higher-trust one — that's a contradiction to confirm, not an
@@ -346,13 +371,29 @@ export class FileStore implements MemoryStore {
       .map((x) => x.m);
   }
 
-  async forget(id: string): Promise<boolean> {
+  /**
+   * Delete by id. The id an agent passes back has usually made a round trip through a
+   * recall listing and an LLM's copy of it, so it arrives trimmed, quoted, comma-suffixed
+   * or shortened (D-041). We normalize the input, then accept an exact id or — failing
+   * that — an unambiguous prefix of at least MIN_ID_PREFIX characters. Two matches is an
+   * error, never a coin flip: deleting the wrong memory is unrecoverable.
+   */
+  async forget(idOrPrefix: string): Promise<ForgetResult> {
+    const needle = normalizeId(idOrPrefix);
+    if (!needle) return { ok: false, reason: "not-found" };
     return this.withLock(async () => {
       const memories = await this.readAll();
-      const next = memories.filter((m) => m.id !== id);
-      if (next.length === memories.length) return false;
-      await this.writeAll(next);
-      return true;
+      let target = memories.find((m) => m.id.toLowerCase() === needle);
+      if (!target && needle.length >= MIN_ID_PREFIX) {
+        const matches = memories.filter((m) => m.id.toLowerCase().startsWith(needle));
+        if (matches.length > 1) {
+          return { ok: false, reason: "ambiguous", matches: matches.map((m) => m.id) };
+        }
+        target = matches[0];
+      }
+      if (!target) return { ok: false, reason: "not-found" };
+      await this.writeAll(memories.filter((m) => m !== target));
+      return { ok: true, id: target.id };
     });
   }
 

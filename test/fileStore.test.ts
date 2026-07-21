@@ -142,7 +142,7 @@ describe("FileStore recall and forget", () => {
     try {
       const { memory } = await store.save({ text: "jam uses Linux", source: "user-explicit" });
 
-      assert.equal(await store.forget(memory.id), true);
+      assert.deepEqual(await store.forget(memory.id), { ok: true, id: memory.id });
       assert.deepEqual(await store.recall("", 10), []);
     } finally {
       await cleanup();
@@ -153,7 +153,7 @@ describe("FileStore recall and forget", () => {
     const { store, cleanup } = await tempStore();
     try {
       await store.save({ text: "jam uses Linux", source: "user-explicit" });
-      assert.equal(await store.forget("does-not-exist"), false);
+      assert.deepEqual(await store.forget("does-not-exist"), { ok: false, reason: "not-found" });
       assert.equal((await store.recall("", 10)).length, 1);
     } finally {
       await cleanup();

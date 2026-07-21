@@ -656,3 +656,69 @@ alias is still a clear error naming every key received (D-037's message, unchang
 
 The general rule: **be strict about what you store, liberal about what you are called with.** The
 quality gate belongs on the memory's content, never on the caller's spelling.
+
+### D-040 — Auto-subject declines to guess on long or multi-topic text
+
+Reported from a real stress test: the user fed his full accounting documentation to an agent and
+told it to save liberally. Three consecutive `save_memory` calls — a financial model, a personal
+profile, then a bookkeeping model — each superseded the *immediately previous* one, so only the
+last survived. The gate log names the cause precisely (21 Jul 2026, 15:35–15:36Z): all three were
+saved with `"subject":"location"`.
+
+None of the three was about location. Each merely happened to contain the word *lives*:
+"jam's accounting system **lives** in ~/Documents/accountant", "jam **lives** in Athens", "jam's
+bookkeeping **lives** in ~/Documents/accountant". D-027's keyword rules scan the whole text and
+the first match wins, which is sound for a one-line fact and indefensible for a thousand-character
+multi-topic dump: an incidental verb anywhere in five paragraphs decided what the memory was
+*about*, and subject equality is exactly what drives supersession (D-015).
+
+We verified the other half of the hypothesis and it was clean: supersession is guarded by
+`if (candidate.subject)` and cannot fire on an absent subject. The bug was entirely upstream, in
+what we were willing to guess.
+
+Two guards, both in `deriveSubject`, both refusals rather than corrections:
+
+1. **A length ceiling (300 characters).** Above it we return `undefined`. A single fact is far
+   below it; a pasted profile or financial model is far above. Length is a crude proxy for
+   "is this about one thing", but it is the honest one — it is exactly the regime where the
+   first-match-wins scan stops being evidence.
+2. **An ambiguity guard.** If two or more *different* keyword rules match, we return `undefined`.
+   Text tripping both `location` and `email` is covering several topics, and picking the earlier
+   rule is an arbitrary tiebreak dressed up as a decision.
+
+The asymmetry that makes both calls easy is the one D-027 already stated and then under-applied:
+**no subject is safe, a wrong subject is not.** A memory without a subject is simply not
+subject-supersedable — it sits there, recallable, harmless. A memory with a wrongly-derived
+subject silently retires an unrelated fact the user asked us to keep. The costs are not
+comparable, so neither is the burden of proof. An agent-supplied `subject` is still honoured
+without question at any length: that is a statement of intent, not a guess.
+
+### D-041 — An id we print must be an id we accept back
+
+`forget_memory` answered "No memory with that id" for an id taken straight out of `recall_memory`
+output. Both halves were ours.
+
+Recall printed `- [type] <text> (id <uuid>, <createdAt>)`. On a real memory the text runs for
+paragraphs, so the id arrived at the end of a wall of prose, wrapped in parentheses, with a comma
+welded to its last character. What comes back is whatever the model's copy of that survived:
+truncated, backticked, comma-suffixed. We then compared it with `===` against the stored id and
+said no.
+
+Fixed on both sides, because either alone leaves the round trip fragile:
+
+- **Recall gives the id its own line**, last, prefixed `id: `, with no adjacent punctuation and
+  nothing after it. Unambiguous to a parser and to a language model.
+- **Forget normalizes and resolves.** Copy noise (quotes, backticks, brackets, an `id:` label, a
+  trailing comma or period) is trimmed by character class — ids are hex and hyphens, so anything
+  else on either end is not part of the id. Then an exact match, or failing that an unambiguous
+  prefix of at least 8 characters.
+
+Eight is the floor because the first 8 hex characters of a v4 UUID are ~4 billion apart: a prefix
+that short is already a near-certain identifier, and anything shorter is a typo, not a shorthand.
+Two matches is an error naming both ids, never a coin flip — deletion is the one operation here
+with no undo, so ambiguity resolves to a question, not a guess. A too-short prefix is a plain
+miss rather than a loose match, and the not-found message now says where ids come from and what
+shape they take.
+
+The rule this encodes: **an interface that emits an identifier owes the caller acceptance of it.**
+Strictness at the boundary is only defensible when the boundary is legible, and ours was not.

@@ -16,6 +16,11 @@
 //      noun phrase as the subject ("my favorite color is blue" → "favorite-color").
 // The output is a lowercase, hyphenated key, matching the convention used elsewhere.
 
+/** Longest text we will guess a subject for. A one-fact memory ("jam now lives in Athens")
+ *  is well under this; a pasted profile or financial model is far over it. Auto-derivation
+ *  is the only thing gated by this — an agent-supplied `subject` is always honoured. */
+const MAX_AUTO_SUBJECT_CHARS = 300;
+
 const STOPWORDS = new Set([
   "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have",
   "in", "is", "it", "its", "of", "on", "or", "that", "the", "their", "this", "to",
@@ -50,9 +55,17 @@ const COPULA = /\b(?:my|your|their|his|her|our|its|the|[a-z]+'s)\s+([a-z]+(?:\s+
 export function deriveSubject(text: string): string | undefined {
   const lower = text.toLowerCase();
 
-  for (const { subject, pattern } of KEYWORD_RULES) {
-    if (pattern.test(lower)) return subject;
-  }
+  // A long memory is almost never ABOUT one thing (D-040). The rules below scan the whole
+  // text and the first hit wins, so on a multi-paragraph dump an incidental "lives in
+  // ~/Documents/accountant" makes the memory's subject "location" — and three unrelated
+  // dumps then supersede each other in turn. Above this length we decline to guess.
+  if (lower.length > MAX_AUTO_SUBJECT_CHARS) return undefined;
+
+  // Ambiguity guard (D-040): if the text trips two or more DIFFERENT keyword rules it is
+  // covering several topics, and "first match wins" would be an arbitrary pick. Decline.
+  const hits = KEYWORD_RULES.filter((r) => r.pattern.test(lower));
+  if (hits.length > 1) return undefined;
+  if (hits.length === 1) return hits[0].subject;
 
   const m = COPULA.exec(lower);
   if (m) {

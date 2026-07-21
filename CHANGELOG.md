@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-07-21
+
+### Fixed
+
+- **Unrelated memories no longer retire each other when no `subject` is given**
+  (DECISIONS D-040). Found in a real stress test: three consecutive saves — a financial model, a
+  personal profile, a bookkeeping model — each superseded the immediately previous one. The gate
+  log shows why: all three were auto-assigned `subject: "location"`, because each happened to
+  contain the word *lives* ("jam's accounting system **lives** in ~/Documents/accountant", "jam
+  **lives** in Athens"), and D-027's keyword scan takes the first match anywhere in the text.
+  Auto-derivation now declines on text over 300 characters, and declines whenever two different
+  keyword rules match — a multi-topic dump is not *about* one thing, and first-match-wins is an
+  arbitrary pick there. No subject means no supersession, which is the safe default; an
+  agent-supplied `subject` is still honoured at any length. Supersession itself was already
+  guarded and never fires on an absent subject; that is now covered by a test.
+
+- **`forget_memory` accepts the id `recall_memory` printed** (DECISIONS D-041). An id copied
+  straight out of a recall listing was rejected with "No memory with that id". Recall used to
+  bury the id in `(id <uuid>, <date>)` at the end of a memory that can run for paragraphs, so
+  what came back was truncated, backticked or comma-suffixed — and forget compared it with exact
+  equality. Recall now prints the full id on its own line (`id: <uuid>`) with no adjacent
+  punctuation, and forget strips copy noise before matching, then resolves an exact id or an
+  unambiguous prefix of 8+ characters. An ambiguous prefix is an error naming every match, never
+  a guess — deletion has no undo.
+
 ## [0.7.4] - 2026-07-21
 
 ### Fixed

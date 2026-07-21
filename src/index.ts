@@ -102,10 +102,19 @@ export function createServer(
       },
       {
         name: "forget_memory",
-        description: "Delete a stored memory by its id.",
+        description:
+          "Delete a stored memory by the id shown in recall_memory output. The full id is " +
+          "safest; an unambiguous prefix of 8+ characters also resolves.",
         inputSchema: {
           type: "object",
-          properties: { id: { type: "string", description: "The memory id to forget." } },
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "The memory id to forget, exactly as recall_memory printed it (or an " +
+                "unambiguous first-8-characters-or-more prefix of it).",
+            },
+          },
           required: ["id"],
         },
       },
@@ -242,15 +251,32 @@ export function createServer(
     if (name === "recall_memory") {
       const hits = await store.recall(String(args.query ?? ""), Number(args.limit ?? 5));
       if (hits.length === 0) return { content: [{ type: "text", text: "No matching memories." }] };
+      // The id goes on its own line, last, with nothing punctuating it (D-041). Inline
+      // `(id …, <date>)` put a comma against the id and buried it after a memory that can
+      // run for paragraphs — agents copied a truncated or comma-suffixed id into
+      // forget_memory and got "No memory with that id".
       const body = hits
-        .map((m) => `- [${m.type ?? "untyped"}] ${m.text} (id ${m.id}, ${m.createdAt})`)
+        .map(
+          (m) =>
+            `- [${m.type ?? "untyped"}] ${m.text}\n` +
+            `  created ${m.createdAt}\n` +
+            `  id: ${m.id}`,
+        )
         .join("\n");
       return { content: [{ type: "text", text: body }] };
     }
 
     if (name === "forget_memory") {
-      const ok = await store.forget(String(args.id ?? ""));
-      return { content: [{ type: "text", text: ok ? "Forgotten." : "No memory with that id." }] };
+      const given = String(args.id ?? "");
+      const res = await store.forget(given);
+      if (res.ok) return { content: [{ type: "text", text: `Forgotten (id ${res.id}).` }] };
+      const msg =
+        res.reason === "ambiguous"
+          ? `"${given}" matches ${res.matches.length} memories (${res.matches.join(", ")}). ` +
+            `Pass more of the id.`
+          : `No memory with id "${given}". Ids come from recall_memory — pass the full id ` +
+            `(or at least its first 8 characters), with no surrounding punctuation.`;
+      return { content: [{ type: "text", text: msg }] };
     }
 
     return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
