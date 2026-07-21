@@ -3,6 +3,25 @@
 Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
+- **0.7.3 — third dogfooding bug of the day: a session never recovered from a server restart
+  (2026-07-21; D-038).** A claude.ai conversation had a working session, the droplet's
+  `jamgate.service` restarted for a deploy, and every later `save_memory` in that same
+  conversation failed with "session expired" / "Not connected" — asking the client to reconnect
+  did not help either. Sessions live in process memory, so a restart invalidates every session id
+  in the wild; the Streamable HTTP spec makes **HTTP 404** the signal that tells a client to
+  re-initialize, and we answered **400**, which a client reads as "this request was malformed".
+  The prose in the error was correct and only the number was load-bearing. Now: unknown/expired
+  `Mcp-Session-Id` → 404 on POST, GET and DELETE; *missing* session id → still 400 (a genuinely
+  malformed request, same spec section); auth still runs first, so a valid token + dead session
+  is 404 while a wrong token + dead session stays 401; an `initialize` carrying a stale id is
+  accepted and issued a fresh id rather than refused mid-recovery. **Deliberately not built:**
+  session persistence to disk (a session owns a live server + open stream, not a serializable
+  row) and a SIGTERM drain handler (awaiting `httpServer.close()` hangs on idle SSE streams →
+  systemd waits out `TimeoutStopSec` then SIGKILLs, turning an instant restart into a 90s one).
+  The systemd unit was reviewed and left unchanged; store writes are atomic renames under a
+  self-healing lock, so a hard kill needs no drain. 235 tests (was 226; 6 of the 9 new ones fail
+  against the old code). Published; droplet on 0.7.3, **verified live from the laptop**:
+  initialize → restart mid-session → old session id returns 404 → re-initialize → save succeeds.
 - **0.7.2 — production bug from dogfooding: "the gate rejected everything with 'too short',
   even a 1700-character memory" (2026-07-21; D-037).** The text had never reached the gate:
   `String(args.text ?? "")` turned a missing/misnamed `text` into `""` and the prefilter judged
