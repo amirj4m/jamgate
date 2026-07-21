@@ -248,9 +248,18 @@ export function createServer(
           .join(", ");
         msg =
           `Not saved — "${result.memory.text}" looks like a semantic duplicate of an ` +
-          `existing memory: ${near}. If it is genuinely the same fact, nothing to do. If it ` +
-          `is a distinct fact or an update, re-save with a \`subject\` so the gate treats it ` +
-          `as its own memory (or a time-aware update of that subject).`;
+          `existing memory: ${near}. If it is genuinely the same fact, nothing to do. ` +
+          // The advice has to match what the caller actually sent. Since 0.8.0 this branch
+          // is reachable WITH a subject (D-044), and telling an agent that just supplied
+          // one to "re-save with a subject" reads as the gate ignoring its input. Point it
+          // at the existing memory's subject, which is the thing that would actually work.
+          (result.memory.subject
+            ? `If it is an UPDATE to that memory, re-save it with the EXISTING memory's ` +
+              `subject (shown above) rather than "${result.memory.subject}" — supersession ` +
+              `matches on the subject string, so a different spelling reads as a different ` +
+              `topic. If it is a genuinely distinct fact, say so and re-save it.`
+            : `If it is a distinct fact or an update, re-save with a \`subject\` so the gate ` +
+              `treats it as its own memory (or a time-aware update of that subject).`);
       } else {
         msg = `Saved: "${result.memory.text}" [id ${result.memory.id}]`;
         // A "did you mean to update?" hint, never an action (D-045). Two saves tracking the

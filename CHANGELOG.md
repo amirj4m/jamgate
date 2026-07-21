@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `possible_duplicate` message no longer tells an agent to add a `subject` it already
+  sent.** Widening the near-duplicate check (D-044) made that branch reachable for
+  subject-bearing saves, and the advice was written when it could not be. It now points at
+  the *existing* memory's subject — the thing that would actually cause supersession — and
+  explains that a different spelling reads as a different topic.
+
 ## [0.8.0] - 2026-07-21
 
 Gate-quality release, driven entirely by a twelve-save stress test against the live server.
