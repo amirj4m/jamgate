@@ -3,6 +3,18 @@
 Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
+- **0.7.4 — the D-037 mystery is solved: the claude.ai/Cowork client sends `content`, not
+  `text` (2026-07-21; D-039).** Live evidence, not a guess: that is exactly why the handler saw
+  empty text and answered the absurd "too short". `save_memory` now resolves its text from
+  `text` → `content` → `memory` (first non-empty string) and the gate judges it identically;
+  `text` stays canonical, wins when both are present, and the aliases are named in the tool
+  description so agents keep preferring it. When none is usable, the 0.7.2 error is unchanged.
+  **Deliberately did NOT add `additionalProperties: false`** — a hard schema rejection is the
+  same non-save with a nicer error, we don't control the clients that call this neutral layer,
+  and it would also refuse a client that merely attaches an extra key like `session_id`. Be
+  strict about what you store, liberal about what you're called with. 240 tests (was 235).
+  Published; droplet on 0.7.4, **verified live**: a `content`-shaped save over the real
+  `/mcp` reached the gate and was saved (probe deleted afterwards).
 - **0.7.3 — third dogfooding bug of the day: a session never recovered from a server restart
   (2026-07-21; D-038).** A claude.ai conversation had a working session, the droplet's
   `jamgate.service` restarted for a deploy, and every later `save_memory` in that same
