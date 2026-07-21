@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-21
+
+Gate-quality release, driven entirely by a twelve-save stress test against the live server.
+The gate got six things right — no ping-pong across twelve different-topic saves, correct
+same-subject supersession, exact-duplicate rejection, long and Persian memories, prefix
+`forget` — and let six things through that it should not have. This release closes them.
+
+**Minor bump, not a patch: the gate now refuses input it previously accepted.** Nothing that
+was already stored is affected, and no configuration changes, but a client that saved a
+credential, a bare word, a question or a weather note will now get a rejection with a reason.
+
+### Added
+
+- **The gate refuses to store credentials** (DECISIONS D-042). A fake API key and a password
+  were both saved by 0.7.5 — the gate had no notion of a secret at all. Rejection now rests
+  on two grounds and nothing else: a token matching a vendor credential format (`sk-…`,
+  `AKIA…`, `ghp_…`, `npm_…`, `xox…`, Stripe, GitLab, Google, SendGrid, JWTs, PEM private-key
+  blocks, `Bearer` headers), or a high-entropy mixed-alphabet token *next to* credential
+  wording. Neither entropy nor wording alone is enough, and the three-character-class
+  requirement means a git sha, a UUID or any hex digest can never trip it by construction.
+  Password assignments (`password: …`, `api_key = …`) are caught, while facts *about*
+  credentials ("jam's password manager is 1Password") pass — the separator must touch the
+  keyword. A refused secret is also **redacted from `gate.log`**: refusing to store a
+  credential while logging it verbatim would move the secret, not protect it.
+
+- **Junk, questions and transient notes are rejected** (DECISIONS D-043). The bare word
+  `test` (4 characters, so it cleared the length floor), the question "how much is jam's
+  rent?", and "it's raining in Athens right now" were all stored as durable facts by 0.7.5.
+  Now: text with fewer than two meaningful tokens or nothing but placeholders (`test`,
+  `foo bar`) is refused; text that is interrogative *as a whole* is refused, while a
+  rhetorical question inside a longer memory is untouched; and present-moment statements are
+  refused **unless** the caller passes a `type`, in which case they are stored as the
+  short-TTL volatile state the model already provides for (RULES §4). The transient marker
+  list deliberately excludes "currently" and "today" — "jam is currently building Jamgate"
+  is a durable fact, and losing those costs more than the notes it would catch. All rules are
+  Unicode-aware, so Persian memories keep saving cleanly.
+
+- **Related-memory hints** (DECISIONS D-045). Between 0.60 and the duplicate threshold, a
+  memory is **stored** and the existing look-alike is named in the reply — its text, its id
+  and its `subject` — so the agent can re-save with a shared subject if the two are really
+  one tracked value. A hint never retires anything.
+
+### Fixed
+
+- **The semantic near-duplicate check now runs on every new fact** (DECISIONS D-044). A
+  reworded copy of an existing memory was stored as new — the stress test's top finding. The
+  droplet audit cleared the obvious suspect: the optional embedder is loaded and healthy in
+  production (`semantic embeddings active`, model cached, 11 of 12 memories carrying
+  vectors). The real cause was an `else`: the near-duplicate check ran only for candidates
+  with **no** `subject`, on the reasoning that a subject signals intent to update. That holds
+  when the subject *matches* something and not when it matches nothing — so a reword whose
+  subject was merely spelled differently walked through. The check now runs whenever a save
+  retired nothing, which closes the gap without touching supersession: a candidate that
+  superseded something never reaches it.
+
+- **The `subject` tool description now tells agents when it is mandatory.** Two saves about
+  one tracked value ("savings 5/10, €640" then "7/10, €768") stayed active side by side
+  because neither carried a subject. The description now says to always pass one — reusing
+  the earlier memory's exact string — when a memory updates something already tracked.
+
+- **Embedder load failures name their cause.** The degraded path is silent by design, so the
+  only evidence the semantic layer is missing was one line reading "unavailable". It now
+  distinguishes a missing optional peer dependency from a model that could not be downloaded
+  or cached, and says what to do about each.
+
+### Changed
+
+- **`DEFAULT_DUP_THRESHOLD` stays at 0.88, now for a measured reason** (DECISIONS D-045).
+  The constant claimed paraphrases sit at 0.85–0.95 while different facts sit "well below".
+  Measuring the real model showed that is false — the populations overlap: rewords span
+  0.76–0.94 while "jam uses Windows" vs "jam uses Linux" reaches 0.81. No single cutoff
+  separates restatement from update, so the threshold is documented as the precision-first
+  trade it actually is, and the ambiguous band became a hint instead of a guess.
+
 ## [0.7.5] - 2026-07-21
 
 ### Fixed

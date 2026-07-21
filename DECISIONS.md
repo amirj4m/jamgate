@@ -722,3 +722,152 @@ shape they take.
 
 The rule this encodes: **an interface that emits an identifier owes the caller acceptance of it.**
 Strictness at the boundary is only defensible when the boundary is legible, and ours was not.
+
+### D-042 — A shared memory must refuse credentials
+
+A twelve-save stress test handed the gate a fake API key and a password. Both were stored.
+The gate had no notion of a credential at all — it checked length and pleasantries, and a
+40-character key is neither short nor a greeting.
+
+This is the worst thing the store can hold. A memory here is not a file on one disk: it is
+read back verbatim into every future agent session, it syncs to the remote instance, and the
+save also appends the text to `gate.log`. One careless save fans a secret out across every
+surface the project exists on.
+
+Detection is deterministic and rests on exactly two grounds, because the failure modes are
+asymmetric in both directions. Missing a secret stores it. But wrongly refusing a real
+memory is worse than it looks: the agent cannot tell a principled refusal from a broken one,
+so it learns the gate is unreliable and routes around it. So:
+
+1. **Shape** — a token matching a vendor-assigned credential format (`sk-…`, `AKIA…`,
+   `ghp_…`, `npm_…`, `xox…`, a JWT, a PEM block, a `Bearer` header). These prefixes exist
+   precisely so the format is unambiguous; matching one is near-proof, not a heuristic.
+2. **Entropy + context** — a high-entropy mixed-alphabet token AND credential wording
+   nearby. Neither half alone: entropy alone flags every git sha, and wording alone flags
+   "jam uses a password manager".
+
+The character-class requirement is the load-bearing part of rule 2 and the reason it can be
+trusted. A credential body mixes lowercase, uppercase and digits; a hex digest — git sha,
+UUID, MD5 — has at most two classes no matter how long or how random it is. Requiring three
+excludes every hex identifier *by construction* rather than by a tuned threshold, which is
+why "fixed it in commit aee2a73f8c…" passes and always will.
+
+The password rule needs one more guard. `password` is a common word in durable facts, and
+"jam's password manager is 1Password" has the keyword, a copula and a mixed-case value. It
+survives because the rule demands the separator TOUCH the keyword: `password: X`,
+`password = X`, `password is X`. That adjacency is what distinguishes "here IS my password"
+from "here is a fact ABOUT passwords".
+
+And the rejection **redacts**. Refusing to store a secret while writing it to the decision
+log verbatim would move the secret, not protect it. The log keeps the decision and the
+reason — which is all the future classifier learns from anyway — and records the text as
+`[redacted: N characters]`. Security theatre is worse than no security, because it is
+believed.
+
+### D-043 — Junk, questions and weather are not memories
+
+Three more of the twelve stress-test saves were not facts: the bare word `test`, the
+question "how much is jam's rent?", and "it's raining in Athens right now". Each cleared the
+4-character minimum, and length was never the right question to ask.
+
+Three narrow rules, each firing only on an unambiguous signal:
+
+**Structure.** A memory is a claim about the user, and a single token cannot be one. Fewer
+than two meaningful tokens, or nothing but filler and placeholder words, is refused. `test`
+is one token. `test test` is two placeholder tokens. "jam codes" is a memory.
+
+**Questions.** A question asks *for* a fact; it is not one. Refused when the text is
+interrogative *as a whole* — ends on a question mark AND either opens interrogatively or is
+a single sentence. The single-sentence condition is what protects a long memory containing a
+rhetorical question, which is a real thing people save and which a naive `endsWith("?")`
+would destroy.
+
+**Transience.** "Right now" observations are real, just short-lived, and the model already
+has a layer for them (RULES §4). So this is the one rule that refuses *conditionally*: with
+a `type` the memory is stored and its TTL ages it out; without one the gate would file a
+weather report as a permanent fact, so it refuses and says exactly how to save it properly.
+
+The marker list is deliberately small, and what was left OUT is the decision. "Currently"
+and "today" were both considered and rejected as markers: "jam is currently building
+Jamgate" is a durable project fact, and losing facts like that costs more than the occasional
+transient note it would catch. A condition word alone is likewise not enough — "prefers dry
+climates to humid ones" mentions weather without describing any, so a weather word only
+counts when framed as *happening* ("it's raining", a progressive verb, a temperature).
+
+All of it is Unicode-aware, and that is not a nicety. A Persian memory saved cleanly in the
+same stress test; an ASCII tokenizer would count zero tokens in it and reject it as junk.
+
+### D-044 — A near-duplicate check that only ran half the time
+
+The stress test's first and highest-priority finding: a semantic REWORDING of an existing
+memory was stored as a new fact. The obvious suspect was the optional embedder silently
+failing in production — plausible, since it degrades quietly by design.
+
+We audited the droplet before changing anything, and the suspect was innocent. The service
+logs `semantic embeddings active (Xenova/all-MiniLM-L6-v2)` at start, the model is cached in
+the package directory, and 11 of the 12 stored memories carry a 384-dimension vector. The
+semantic layer was fully alive.
+
+The bug was structural, three lines up from the check. `applyGate` read:
+
+```ts
+if (candidate.subject) { …supersession… }
+else if (candidate.embedding) { …near-duplicate check… }
+```
+
+The `else` encoded a real intuition — supplying a subject signals intent to update, so a
+duplicate check would be wrong. But that intuition only holds when the subject MATCHES
+something. When it matches nothing, the candidate is about to be stored as a brand-new fact
+and no one has looked for a reworded copy of it at all. A reword whose subject was spelled
+differently from the original's — `editor-theme` vs `colour-scheme`, or an agent-supplied
+subject against a derived one — walked straight through the gap.
+
+The condition is now "did this save retire anything?" rather than "does it have a subject?".
+A candidate that superseded something never reaches the check, so a legitimate update is
+still never mistaken for a duplicate; a candidate that superseded nothing always reaches it.
+The guard survives, its blind spot does not.
+
+### D-045 — Where a threshold cannot help, say so and hand it to the agent
+
+The last stress-test finding was two saves tracking one value — "ThinkBook savings 5/10,
+€640", later "7/10, €768" — both left active. The tempting fix is to lower the duplicate
+threshold until it catches them.
+
+We measured the real model first, on the actual pairs:
+
+| cosine | pair |
+| --- | --- |
+| 0.94 | reworded duplicate (Jamgate description) |
+| 0.87 | same subject, NEW value ("uses Windows" → "moved to Linux") |
+| 0.83 | reworded duplicate (dark theme) |
+| **0.81** | **DIFFERENT facts** ("jam uses Windows" / "jam uses Linux") |
+| 0.76 | reworded duplicate (Athens) |
+| 0.67 | same subject, NEW value (ThinkBook savings) |
+
+The populations interleave. There is no cutoff that catches the 0.83 reword without also
+calling "jam uses Linux" a duplicate of "jam uses Windows" at 0.81 — the exact case RULES
+§2.3 says is a supersession, never a duplicate. And the ThinkBook pair at 0.67 sits below
+every reword we measured; no threshold reaches it while remaining a threshold at all.
+
+The conclusion is not a better number. It is that **restatement-vs-update is a subject
+question wearing a similarity costume.** Cosine measures topical closeness; it cannot see
+that 5/10 and 7/10 are the same counter at two times. So the gate stops pretending:
+
+- 0.88 and above → refuse as a `possible_duplicate`. Kept where it is, now for a stated
+  reason: it clears the measured 0.81 ceiling of genuinely-different facts with margin, so a
+  false refusal is unlikely. The acknowledged cost is the 0.76–0.83 rewords it misses.
+- 0.60 to 0.88 → **store the memory, and name what it resembles.** The reply tells the agent
+  which existing memory it looks like, that memory's `subject`, and what to do if the two are
+  really one tracked value.
+
+The asymmetry that makes the second band safe is the same one running through D-027 and
+D-040: a hint cannot retire a fact. Auto-superseding on 0.67 similarity would re-create the
+D-040 ping-pong the previous release just fixed, on flimsier evidence. Telling the agent
+costs a line of output and risks nothing, which is why a hint is allowed a lower bar of
+evidence than an action.
+
+This is also the honest division of labour. The gate holds the whole prior memory, which the
+agent cannot see — that is what §2's stateful checks are for. But the agent holds the
+conversation, which the gate cannot see, and "is this the same counter?" is a question only
+the conversation answers. Handing it back is not the gate giving up; it is the gate routing
+the question to whoever can actually answer it (RULES §5.4).

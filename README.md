@@ -65,13 +65,21 @@ A memory is kept only if it is **durable** (still true after this session) and w
 
 | Layer | What it does |
 | --- | --- |
-| **Rule pre-filter** | Drops obvious non-durable noise ("I'm on a call now") before it reaches the store. |
+| **Rule pre-filter** | Drops obvious non-durable noise before it reaches the store: fragments, pleasantries, placeholder text (`test`, `foo bar`), and anything that isn't a claim about you. |
+| **Credential refusal** | Refuses to store secrets. API keys (`sk-…`, `AKIA…`, `ghp_…`, JWTs, PEM blocks), password assignments, and high-entropy tokens next to credential wording are rejected with a reason — and kept out of the decision log too. A git sha or UUID in ordinary prose passes untouched. |
+| **Question filter** | A question asks *for* memory, it isn't memory. `how much is jam's rent?` is refused; a rhetorical question inside a longer fact is not. |
+| **Transience filter** | Statements pinned to this instant ("it's raining right now") are refused unless you type them as `state`, where a short TTL ages them out on their own. |
 | **Agent salience** | Uses the calling agent's own understanding as the main "is this worth remembering?" filter — no extra LLM call of our own. |
 | **Exact dedup** | Identical facts are never stored twice. |
 | **Time-aware supersession** | Every memory is a timestamped event; a newer fact retires an older one on the same `subject` by recency — no contradiction pile-up, and it never throws your own stale words back at you. |
 | **Trust hierarchy** | A lower-trust source (an agent's guess) can't silently overwrite a higher-trust fact (something you said explicitly). The gate refers the conflict back to you instead. |
 | **Semantic near-dup** *(optional)* | With local embeddings on, a save that *means* the same as an existing memory returns as a `possible_duplicate` to confirm, rather than piling up. |
+| **Related-memory hint** *(optional)* | Below the duplicate bar but clearly on the same topic, the memory is **stored** and the look-alike is named, so the agent can re-save with a shared `subject` if it was really an update. A hint never retires anything. |
 | **Type-based expiry** | Volatile state ages out (~2 days) while identity never does, so recall stays current automatically. |
+
+Every rejection comes back with a reason the calling agent can act on — the agent is the
+only party able to correct the call, and a bare "rejected" just teaches it to work around
+the gate.
 
 Everything is taggable, expirable, and deletable — you always see and control what's
 remembered.
@@ -185,7 +193,7 @@ All configuration is via environment variables; every one has a sensible default
 | --- | --- | --- |
 | `JAMGATE_STORE` | `~/.jamgate/memory.json` | Path to the memory store file. |
 | `JAMGATE_EMBEDDINGS` | auto | `off` disables the semantic layer even if the model is installed. |
-| `JAMGATE_DUP_THRESHOLD` | `0.88` | Semantic near-duplicate sensitivity (0–1); higher = stricter. |
+| `JAMGATE_DUP_THRESHOLD` | `0.88` | Semantic near-duplicate sensitivity (0–1); higher = stricter. Measured against the real model, true rewordings span ~0.76–0.94 and *different* facts reach ~0.81, so the two overlap — 0.88 deliberately favours never refusing a real memory over catching every reword. |
 | `JAMGATE_GATE_LOG` | on | `off` disables the local decision log. |
 | `JAMGATE_TTL_<TYPE>_DAYS` | per type | Override the freshness window for a memory type, e.g. `JAMGATE_TTL_PROJECT_DAYS=180`. |
 | `JAMGATE_HTTP` | off | `1`/`true` enables [remote mode](#remote-mode-self-hosted) (same as the `--http` flag). |
