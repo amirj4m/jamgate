@@ -472,3 +472,41 @@ cross-process `withFileLock` as the memory store (D-020..D-023), re-reading fres
 the file self-prunes expired codes/tokens on every write. The public base URL for the advertised
 endpoints is derived from the reverse proxy's `X-Forwarded-Proto`/`X-Forwarded-Host` so the
 metadata points at the externally-reachable HTTPS URL, not the localhost bind. Phase 9.
+
+### D-035 — Import another product's memory, through the gate; curated entries only, never chat logs
+The worst moment in switching AI tools is the cold start: you have already told the other product
+who you are, and none of it comes with you. Jamgate is a *gate, not a store*, so the honest way to
+solve this is not a scraper — it is a parser plus the gate we already have. `jamgate import
+--from claude|chatgpt <path>` turns a vendor memory export into `Memory[]` and hands it to the
+**same** `importBatch` path as a native import (D-033): exact-duplicate dedup, time-aware
+supersession, the trust/contradiction guard, near-duplicate detection. Vendor records get no
+privileged path around the gate — that is the whole point of importing rather than copying.
+
+**What the formats actually are (checked July 2026).** Neither vendor's bulk account data export
+contains memory entries. Claude's export holds conversations and account data; ChatGPT's holds
+`conversations.json`, `chat.html`, `user.json`, `message_feedback.json`, `model_comparisons.json`.
+Both keep memory in their own settings UI (Claude: Settings → Capabilities → "View and edit your
+memory"; ChatGPT: Settings → Personalization → Memory → Manage) with a documented copy-out path,
+and Anthropic's own memory-transfer format is `[date saved, if available] - memory content`. So the
+primary parser is a **text/markdown line parser**, built on a format we could verify, and the JSON
+path is explicitly **best-effort** for structured exports we could not verify — it looks for
+entries under memory-ish keys and fails loudly rather than guessing. We still accept the `.zip` or
+extracted folder and pick the memory-shaped file out of it, because that is what a user has in
+their Downloads folder. Reading a zip needs no dependency: a ~100-line reader over the central
+directory plus `node:zlib` raw inflate covers STORE/DEFLATE, and anything exotic is refused.
+
+**The line we will not cross: conversation logs are never mined.** They are recognized by name,
+skipped, and reported as skipped. Reconstructing someone's identity from their raw chat history is
+precisely the low-consent inference this project exists to push back on, and "we could get more
+memories that way" is exactly the argument that produces memory nobody asked for. Consent is
+structural here in another way too: Jamgate never touches a vendor account or API — the user
+downloads their own export and points us at a local file.
+
+**Mapping stays conservative.** `source: user-confirmed` — the user curated these entries in the
+source product, which is a confirmation, but not `user-explicit` (they did not dictate them to us)
+and not `agent-inferred` (they are not our guess). `type` is inferred only on obvious wording
+(`preference`/`identity`), otherwise left unset: a wrong type is worse than no type, and untyped
+memories are still recalled. Original dates are preserved so supersession orders history
+correctly; `subject` comes from the same `deriveSubject` rules a live save uses; provenance is
+stamped `import:claude.ai` / `import:chatgpt`. And because a hand-pasted list can carry stray
+prose, every line is a *candidate* only — `--dry-run` shows exactly what would land first. Phase 10.

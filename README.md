@@ -232,6 +232,74 @@ not re-activated. See [DECISIONS D-033](./DECISIONS.md).
 > `JAMGATE_STORE=/data/memory.json jamgate import my-memory.json` on the box (or just place the
 > file at `JAMGATE_STORE` — but `import` is what merges into an existing server store safely).
 
+## Bring your memory with you
+
+You've already told another AI product who you are. Starting from zero on a new one is the worst
+part of switching. `jamgate import --from <vendor>` takes the memory list you exported from
+**Claude** or **ChatGPT** and replays it through the same gate a live save goes through — so you
+get day-one memory instead of a cold start, without smuggling in duplicates or junk.
+
+```bash
+# Claude — a memory list you saved from Settings → Capabilities → "View and edit your memory"
+jamgate import --from claude ~/Downloads/claude-memory.md
+
+# ChatGPT — the list copied from Settings → Personalization → Memory → "Manage memories"
+jamgate import --from chatgpt ~/Downloads/chatgpt-memory.txt
+
+# Point it at the export .zip or the extracted folder — it finds the memory file inside
+jamgate import --from chatgpt ~/Downloads/chatgpt-export.zip
+
+# Always look first. Nothing is written on a dry run.
+jamgate import --from claude ~/Downloads/claude-memory.md --dry-run
+```
+
+### How to get your export
+
+Honest status, checked July 2026: **neither vendor's bulk account data export contains your
+memory entries.** Both keep them in the app's own memory settings, and both document a
+copy-out-the-text path. So the file you feed Jamgate is a text/markdown list, one memory per line:
+
+| Product | Where your memories are | What to do |
+| --- | --- | --- |
+| **Claude** | Settings → Capabilities → **"View and edit your memory"** | Copy the list (or ask Claude: *"Write out your memories of me verbatim, exactly as they appear in your memory"*) into a `.md`/`.txt` file. Anthropic's own memory-transfer format is `[date saved, if available] - memory content` — exactly what we parse. |
+| **ChatGPT** | Settings → Personalization → Memory → **"Manage memories"** | Select the list and copy it into a `.md`/`.txt` file. A trailing `(saved 2026-01-09)` is understood. |
+
+Dates are optional. Bullets (`-`, `*`, `1.`), markdown headings, horizontal rules and code fences
+are handled. If a future export *does* ship structured memory JSON, we'll read that too —
+best-effort, looking for entries under memory-ish keys — and we accept the `.zip` or the extracted
+folder directly and pick the memory-shaped file out of it.
+
+### What we read, and what we deliberately don't
+
+- ✅ **Curated memory / profile entries only** — the list you reviewed and kept in the source app.
+- ❌ **We never mine your conversation logs.** `conversations.json`, `chat.html`,
+  `message_feedback.json` and friends are recognized by name, skipped, and reported as skipped.
+  Inferring facts about you from raw chat history is exactly the low-consent behavior this project
+  exists to push back on. If the export contains nothing but chat logs, the import fails with a
+  message telling you where your memories actually live.
+- ❌ **We never fetch anything from a vendor account.** You download your own export, yourself.
+  Jamgate reads a local file and nothing else.
+
+### What happens to each entry
+
+Every parsed line becomes a memory and goes **through the gate**, never blind-appended:
+
+- **source `user-confirmed`** — you curated these in the source product. Not `user-explicit`
+  (you didn't dictate them to Jamgate), not `agent-inferred` (they aren't our guess).
+- **type inferred conservatively** — `preference` or `identity` only when the wording is obvious;
+  otherwise left **untyped**. A wrong type is worse than no type.
+- **original dates preserved** when the line carries one, so time-aware supersession orders your
+  history correctly. Undated entries are stamped at import time.
+- **provenance recorded** as `import:claude.ai` / `import:chatgpt`, so you can always see where a
+  memory came from.
+- **the gate decides** — exact duplicates are skipped, a newer fact about the same subject
+  supersedes the older one, contradictions with more-trusted memories are flagged instead of
+  silently applied, and near-duplicates are surfaced for you.
+
+Because a hand-pasted file can contain stray prose (a footer, a stray note), every non-empty line
+is a *candidate*. Run `--dry-run` first — it prints exactly what would land. See
+[DECISIONS D-035](./DECISIONS.md).
+
 ## Deploy your own (no terminal needed)
 
 Want one shared memory across your **phone, browser, and laptop** but don't want to run a
@@ -528,9 +596,12 @@ for the full scope):
 - **Deploy your own** *(no terminal)* — a `Dockerfile`, a Render blueprint, and a Railway
   config so a non-technical user can click a button, log into a platform, and get their own
   hosted instance with a generated token and a persistent disk. We host nothing.
+- **Bring your memory with you** — `jamgate import --from claude|chatgpt` replays another
+  product's memory export through the gate, so a new setup starts with day-one memory. Curated
+  entries only; conversation logs are never mined.
 
 Verified end-to-end over the MCP protocol (both stdio and HTTP) and covered by an automated
-test suite (138 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
+test suite (211 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
 (trained on the local decision log) and multi-device sync (see [`DECISIONS.md`](./DECISIONS.md)).
 **Goal: impact, not profit — open-source (MIT), built in the open.**
 

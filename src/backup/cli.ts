@@ -18,6 +18,15 @@ import { resolveDupThreshold } from "../embeddings/embedder.js";
 import type { Memory, SaveResult } from "../store/types.js";
 import { VERSION } from "../version.js";
 import { ImportValidationError, parseImportFile } from "./parse.js";
+import {
+  isVendor,
+  loadVendorSources,
+  parseVendorExport,
+  VendorImportError,
+  VENDORS,
+  type Vendor,
+  type VendorParseResult,
+} from "./vendor.js";
 
 /** The export envelope: the on-disk `{ schemaVersion, memories }` shape plus provenance about
  *  the export itself. `jamgate import` reads it back (and also accepts a bare array). */
@@ -116,27 +125,37 @@ export async function exportCommand(
 interface ImportArgs {
   file?: string;
   dryRun: boolean;
+  from?: Vendor;
   error?: string;
 }
 
-/** Parse `import` args: a positional `<file>` and `--dry-run`. */
+/** Parse `import` args: a positional `<file>`, `--dry-run`, and `--from <vendor>` for reading
+ *  another product's memory export (D-035). Without `--from` the file must be our own format. */
 export function parseImportArgs(argv: readonly string[]): ImportArgs {
   let file: string | undefined;
   let dryRun = false;
+  let from: Vendor | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--dry-run") {
       dryRun = true;
+    } else if (arg === "--from") {
+      const v = argv[++i];
+      if (!v) return { dryRun, error: `--from requires a vendor (${VENDORS.join(" | ")})` };
+      if (!isVendor(v)) {
+        return { dryRun, error: `unknown --from vendor "${v}" (expected ${VENDORS.join(" | ")})` };
+      }
+      from = v;
     } else if (arg.startsWith("-")) {
-      return { dryRun, error: `unknown argument "${arg}"` };
+      return { dryRun, from, error: `unknown argument "${arg}"` };
     } else if (file === undefined) {
       file = arg;
     } else {
-      return { dryRun, error: `unexpected extra argument "${arg}"` };
+      return { dryRun, from, error: `unexpected extra argument "${arg}"` };
     }
   }
-  if (!file) return { dryRun, error: "import requires a file path: jamgate import <file>" };
-  return { file, dryRun };
+  if (!file) return { dryRun, from, error: "import requires a file path: jamgate import <file>" };
+  return { file, dryRun, from };
 }
 
 /** Entry point for `jamgate import`. Returns a process exit code (nonzero only on failure). */
@@ -159,35 +178,66 @@ export async function importCommand(
     return 1;
   }
 
-  let raw: string;
-  try {
-    raw = await fs.readFile(parsed.file as string, "utf8");
-  } catch (e) {
-    err(`jamgate import: could not read ${parsed.file} — ${(e as Error).message}\n`);
-    return 1;
-  }
-
+  const file = parsed.file as string;
   let records: Memory[];
-  try {
-    records = parseImportFile(raw);
-  } catch (e) {
-    if (e instanceof ImportValidationError) {
-      err(`jamgate import: ${parsed.file} is not a valid export — ${e.message}\n`);
+  let vendorNotes: string[] = [];
+
+  if (parsed.from) {
+    // Another product's memory export: parse it into our schema, then hand it to exactly the
+    // same gate below. Vendor records get no special treatment once they're normalized.
+    try {
+      const { sources, explicitFile } = await loadVendorSources(file);
+      const result = parseVendorExport(parsed.from, sources, { explicitFile });
+      records = result.memories;
+      vendorNotes = vendorSummary(parsed.from, result);
+    } catch (e) {
+      if (e instanceof VendorImportError) {
+        err(`jamgate import --from ${parsed.from}: ${e.message}\n`);
+        return 1;
+      }
+      throw e;
+    }
+  } else {
+    let raw: string;
+    try {
+      raw = await fs.readFile(file, "utf8");
+    } catch (e) {
+      err(`jamgate import: could not read ${file} — ${(e as Error).message}\n`);
       return 1;
     }
-    throw e;
+    try {
+      records = parseImportFile(raw);
+    } catch (e) {
+      if (e instanceof ImportValidationError) {
+        err(`jamgate import: ${file} is not a valid export — ${e.message}\n`);
+        return 1;
+      }
+      throw e;
+    }
   }
 
   const store = deps.store ?? backupStore(env);
   const report = await store.importBatch(records, { dryRun: parsed.dryRun });
-  out(formatImportReport(report, { file: parsed.file as string, total: records.length }));
+  out(formatImportReport(report, { file, total: records.length, notes: vendorNotes }));
   return 0;
+}
+
+/** Lines describing what a vendor export actually gave us — which files were read, and which
+ *  conversation logs were deliberately left alone. */
+function vendorSummary(vendor: Vendor, result: VendorParseResult): string[] {
+  const lines = [`  source: ${vendor} export — read ${result.readFiles.join(", ")}`];
+  if (result.skippedConversations.length > 0) {
+    lines.push(
+      `  not read: ${result.skippedConversations.join(", ")} (conversation logs are never mined)`,
+    );
+  }
+  return lines;
 }
 
 /** Render the import outcome as a human-readable report: counts + one line per flagged record. */
 export function formatImportReport(
   report: { outcomes: SaveResult[]; skippedSuperseded: number; dryRun: boolean },
-  ctx: { file: string; total: number },
+  ctx: { file: string; total: number; notes?: readonly string[] },
 ): string {
   const count = (action: SaveResult["action"]) =>
     report.outcomes.filter((o) => o.action === action).length;
@@ -203,6 +253,8 @@ export function formatImportReport(
       ? `jamgate import — dry run of ${ctx.file} (no changes written)\n`
       : `jamgate import — ${ctx.file}\n`,
   );
+  for (const note of ctx.notes ?? []) lines.push(note);
+  const headerLines = lines.length;
 
   // Per-record detail for the outcomes an operator must act on.
   for (const o of report.outcomes) {
@@ -224,7 +276,7 @@ export function formatImportReport(
       lines.push(`  ↻ superseded "${o.memory.text}" retired ${old}`);
     }
   }
-  if (lines.length > 1) lines.push("");
+  if (lines.length > headerLines || headerLines > 1) lines.push("");
 
   const imported = created + superseded;
   lines.push(

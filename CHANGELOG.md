@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-21
+
+**Bring your memory with you.** `jamgate import --from claude|chatgpt` reads the memory list you
+exported from another AI product and replays it through the same quality gate a live save goes
+through — day-one memory on a new setup instead of a cold start. You download your own export,
+yourself; Jamgate only ever reads a local file (see DECISIONS D-035).
+
+### Added
+
+- **`jamgate import --from claude <path>` / `--from chatgpt <path>`** — parse a vendor memory
+  export into Jamgate's schema and import it **through the gate** (exact-duplicate dedup,
+  time-aware supersession, the trust/contradiction guard, near-duplicate detection). Never a blind
+  append. `--dry-run` is supported and prints exactly what would land.
+  - Accepts the export **.zip**, an **extracted folder**, or a single **`.md`/`.txt`/`.json`**
+    file. Inside an archive or folder, only memory-shaped files are opened.
+  - Parses the text shape both vendors actually give you — one memory per line, optional date, as
+    `2026-03-14 - Prefers TypeScript` or `Prefers concise answers (saved 2026-01-09)`. Bullets,
+    headings, horizontal rules and code fences are handled. Structured memory JSON is read
+    best-effort if a future export ships it.
+  - Maps entries conservatively: `source: user-confirmed` (you curated them in the source
+    product), `type` inferred only when obvious (`preference`/`identity`, else untyped), original
+    timestamps preserved, subject derived by the same rules live saves use, and provenance stamped
+    as `import:claude.ai` / `import:chatgpt`.
+  - Reports which files were read and which were skipped, on top of the existing per-record report.
+- **Dependency-free ZIP reader** (`src/backup/zip.ts`) — enough of the format to look inside a
+  vendor export (STORE + DEFLATE via `node:zlib`); ZIP64/encrypted archives are refused with a
+  clear message instead of parsed halfway. No new runtime dependencies.
+
+### Notes
+
+- **Conversation logs are never mined.** `conversations.json`, `chat.html`,
+  `message_feedback.json`, `model_comparisons.json` and friends are recognized by name, skipped,
+  and reported as skipped. Reconstructing facts about a person from raw chat history is exactly the
+  low-consent inference this project exists to push back on.
+- **Format confidence, checked July 2026:** neither vendor's bulk account data export contains
+  memory entries — Claude's export holds conversations and account data, ChatGPT's holds
+  `conversations.json`, `chat.html`, `user.json`, `message_feedback.json`,
+  `model_comparisons.json`. Both products keep memory in their own settings UI with a documented
+  copy-out path, and Anthropic's documented memory-transfer shape is
+  `[date saved, if available] - memory content`. The text parser is therefore built on a
+  **verified** format; the JSON path is explicitly **best-effort** for exports we could not verify,
+  and fails loudly rather than guessing.
+- `jamgate import <file>` without `--from` is unchanged — it still expects Jamgate's own export.
+
 ## [0.6.0] - 2026-07-20
 
 MCP OAuth for remote mode: a self-hosted Jamgate instance can now be added to **claude.ai** and
@@ -274,7 +318,10 @@ single shared memory clean at write time instead of letting it bloat with junk.
 - Verified end-to-end over the MCP protocol and covered by an automated test suite
   (89 tests) running on Node 20.x and 22.x in CI.
 
-[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/amirj4m/jamgate/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/amirj4m/jamgate/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/amirj4m/jamgate/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/amirj4m/jamgate/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/amirj4m/jamgate/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/amirj4m/jamgate/compare/v0.1.0...v0.2.0
