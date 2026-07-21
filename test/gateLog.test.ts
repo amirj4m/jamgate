@@ -130,6 +130,72 @@ describe("gate decision log (D-025)", () => {
     }
   });
 
+  it("never writes a refused credential into the log (D-042)", async () => {
+    // The gate log is a plaintext training buffer that outlives the save. Refusing to STORE
+    // a secret while LOGGING it verbatim would move the secret, not protect it — so a
+    // redacted rejection keeps its decision and reason (what the classifier learns from)
+    // and drops the text.
+    const { store, cleanup } = await tempStore();
+    const { path, dir, config } = await tempLog();
+    const server = createServer(store, config);
+    const client = new Client({ name: "claude-code", version: "1.0.0" }, { capabilities: {} });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    // Assembled at runtime, not committed as a literal: a credential-shaped string in a
+    // source file trips GitHub's push protection, and a test fixture is not worth an
+    // allowlist entry. See the note in test/secrets.test.ts.
+    const SECRET = "sk-" + "proj-Xk39fJdlWmQp2ZnR8sVtY7bL4cHgAe1N";
+    try {
+      await Promise.all([server.connect(st), client.connect(ct)]);
+      const res = await client.callTool({
+        name: "save_memory",
+        arguments: { text: `my openai key is ${SECRET}` },
+      });
+
+      // The caller is told why, in terms it can act on.
+      const reply = JSON.stringify(res.content);
+      assert.match(reply, /refusing to store credentials/);
+
+      const raw = await fs.readFile(path, "utf8");
+      assert.equal(raw.includes(SECRET), false, "the gate log contains the refused secret");
+
+      const lines = await readLines(path);
+      assert.equal(lines.length, 1);
+      assert.equal(lines[0].decision, "rejected");
+      assert.match(String(lines[0].reason), /credentials/);
+      assert.match(String(lines[0].text), /^\[redacted: \d+ characters\]$/);
+
+      // And nothing reached the store.
+      assert.equal((await store.recall("", 10)).length, 0);
+    } finally {
+      await client.close();
+      await server.close();
+      await cleanup();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("logs an ordinary rejection with its text intact", async () => {
+    // Redaction is scoped to credentials — the classifier still needs to see what junk
+    // looks like.
+    const { store, cleanup } = await tempStore();
+    const { path, dir, config } = await tempLog();
+    const server = createServer(store, config);
+    const client = new Client({ name: "claude-code", version: "1.0.0" }, { capabilities: {} });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    try {
+      await Promise.all([server.connect(st), client.connect(ct)]);
+      await client.callTool({ name: "save_memory", arguments: { text: "test" } });
+      const lines = await readLines(path);
+      assert.equal(lines[0].decision, "rejected");
+      assert.equal(lines[0].text, "test");
+    } finally {
+      await client.close();
+      await server.close();
+      await cleanup();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("resolves an env-driven config and honors the off switch", () => {
     assert.equal(resolveGateLogConfig({ JAMGATE_GATE_LOG: "off" }).path, null);
     assert.equal(

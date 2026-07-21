@@ -77,8 +77,13 @@ export function createServer(
               description:
                 "What this memory is about, e.g. 'operating-system', 'location', " +
                 "'current-project'. If a newer memory shares a subject with an older one, " +
-                "the newer replaces it (time-aware supersession). Strongly recommended; " +
-                "if omitted, the gate derives a best-effort subject from the text.",
+                "the newer replaces it (time-aware supersession). ALWAYS pass this when " +
+                "the memory updates something already tracked — a progress figure, a " +
+                "balance, a status, a current choice — and reuse the EXACT subject string " +
+                "the earlier memory used. Without a matching subject the gate cannot tell " +
+                "an update from a new fact and both stay active. If omitted, the gate " +
+                "derives a best-effort subject from the text, and declines to guess when " +
+                "the text is long or covers several topics.",
             },
             source: {
               type: "string",
@@ -175,9 +180,13 @@ export function createServer(
       }
       const text = rawText;
       const client = clientInfoFromHandshake();
-      const verdict = prefilter(text);
+      const verdict = prefilter(text, { type: args.type ? String(args.type) : undefined });
       if (!verdict.ok) {
         // Record the rejection too — the classifier learns from what the gate turns away.
+        // Except the text itself when the rejection WAS about the text being a secret: the
+        // gate log is a plaintext file that outlives the save, and refusing to store a
+        // credential while logging it verbatim would be theatre (D-042). The decision and
+        // the reason are still logged, which is what the classifier actually learns from.
         await appendGateLog(
           {
             decision: "rejected",
@@ -186,7 +195,7 @@ export function createServer(
             subject: args.subject ? String(args.subject) : undefined,
             source: args.source ? String(args.source) : undefined,
             client: client?.name,
-            text,
+            text: verdict.redact ? `[redacted: ${text.length} characters]` : text,
           },
           gateLog,
         );
@@ -244,6 +253,28 @@ export function createServer(
           `as its own memory (or a time-aware update of that subject).`;
       } else {
         msg = `Saved: "${result.memory.text}" [id ${result.memory.id}]`;
+        // A "did you mean to update?" hint, never an action (D-045). Two saves tracking the
+        // same value ("savings 5/10, €640" → "7/10, €768") are only 0.67 apart — nowhere
+        // near a duplicate, yet plainly one subject. The gate cannot tell those from two
+        // genuinely different facts, but the AGENT has the conversation and can. So we
+        // store the memory and name what it resembles.
+        const related = result.relatedMemories ?? [];
+        if (related.length > 0) {
+          const list = related
+            .slice(0, 3)
+            .map(
+              (r) =>
+                `"${r.memory.text}" [id ${r.memory.id}]` +
+                (r.memory.subject ? ` (subject "${r.memory.subject}")` : "") +
+                ` (~${r.similarity.toFixed(2)})`,
+            )
+            .join(", ");
+          msg +=
+            `\nNote — this looks related to: ${list}. If the new memory UPDATES the same ` +
+            `thing rather than adding a separate fact, re-save it with that memory's ` +
+            `\`subject\` so the older one is retired instead of both staying active; then ` +
+            `forget the copy just saved [id ${result.memory.id}].`;
+        }
       }
       return { content: [{ type: "text", text: msg }] };
     }
