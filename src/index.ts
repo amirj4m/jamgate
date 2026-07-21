@@ -60,7 +60,13 @@ export function createServer(
         inputSchema: {
           type: "object",
           properties: {
-            text: { type: "string", description: "The memory, as a clear standalone statement." },
+            text: {
+              type: "string",
+              description:
+                "The memory, as a clear standalone statement. Canonical field — always " +
+                "prefer it; `content` and `memory` are accepted as aliases for clients " +
+                "that send the memory under another name.",
+            },
             type: {
               type: "string",
               enum: ["identity", "project", "preference", "state"],
@@ -117,7 +123,20 @@ export function createServer(
       // "too short" for a memory the agent believed was 1700 characters) or, worse, into the
       // literal "[object Object]" when a client wrapped the text in a content block. Say
       // exactly what is wrong and what arrived, so the caller can correct itself.
-      const rawText = args.text;
+      //
+      // Real clients in the wild send the memory under another name — claude.ai/Cowork
+      // sends `content` (D-039). Accept the aliases silently and identically: a caller
+      // that got the field name wrong still meant to save a memory, and answering it with
+      // an error teaches nothing the description doesn't already say. `text` stays
+      // canonical and wins whenever it is usable.
+      const usable = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+      const rawText = usable(args.text)
+        ? args.text
+        : usable(args.content)
+          ? args.content
+          : usable(args.memory)
+            ? args.memory
+            : args.text;
       if (typeof rawText !== "string" || rawText.trim() === "") {
         const keys = Object.keys(args);
         const received =

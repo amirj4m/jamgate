@@ -6,4 +6,4 @@
  * the same number without importing `package.json` at runtime (which would break once the
  * code is bundled or the file layout changes between `dist/` and the published package).
  */
-export const VERSION = "0.7.3";
+export const VERSION = "0.7.4";

@@ -74,11 +74,11 @@ describe("save_memory argument validation (D-037)", () => {
     const { store, cleanup } = await tempStore();
     const { client, close } = await connected(store);
     try {
-      // The likely real-world cause: a client sending the memory under another field.
-      const { isError, text } = await save(client, { content: LONG_TEXT, type: "project" });
+      // A field name we do not recognise at all — the known aliases are covered in D-039.
+      const { isError, text } = await save(client, { body: LONG_TEXT, type: "project" });
       assert.equal(isError, true);
       assert.doesNotMatch(text, /too short/);
-      assert.match(text, /received keys: content, type/, "the caller can see what arrived");
+      assert.match(text, /received keys: body, type/, "the caller can see what arrived");
     } finally {
       await close();
       await cleanup();
@@ -113,6 +113,94 @@ describe("save_memory argument validation (D-037)", () => {
       const { isError, text } = await save(client, { text: "hm" });
       assert.equal(isError, false, "a real gate verdict is not a usage error");
       assert.match(text, /Rejected by gate: too short \(2 characters, minimum 4\)/);
+    } finally {
+      await close();
+      await cleanup();
+    }
+  });
+});
+
+describe("save_memory field aliases (D-039)", () => {
+  // The claude.ai/Cowork client sends the memory as `content`. Live evidence, not a guess:
+  // it is exactly what produced the empty-text "too short" that D-037 diagnosed.
+  it("accepts a content-only save and stores the value", async () => {
+    const { store, cleanup } = await tempStore();
+    const { client, close } = await connected(store);
+    try {
+      const { isError, text } = await save(client, {
+        content: LONG_TEXT,
+        type: "project",
+        subject: "jamgate-project",
+      });
+      assert.equal(isError, false, text);
+      assert.match(text, /^Saved:/);
+      const stored = await store.exportAll();
+      assert.equal(stored.length, 1);
+      assert.equal(stored[0].text, LONG_TEXT.trim(), "the aliased value is what gets stored");
+    } finally {
+      await close();
+      await cleanup();
+    }
+  });
+
+  it("accepts a memory-only save", async () => {
+    const { store, cleanup } = await tempStore();
+    const { client, close } = await connected(store);
+    try {
+      const { isError, text } = await save(client, { memory: LONG_TEXT, type: "project" });
+      assert.equal(isError, false, text);
+      const stored = await store.exportAll();
+      assert.equal(stored.length, 1);
+      assert.equal(stored[0].text, LONG_TEXT.trim());
+    } finally {
+      await close();
+      await cleanup();
+    }
+  });
+
+  it("lets text win when both text and an alias are present", async () => {
+    const { store, cleanup } = await tempStore();
+    const { client, close } = await connected(store);
+    try {
+      const canonical = `${LONG_TEXT} The canonical field carries this sentence.`;
+      const { isError } = await save(client, {
+        text: canonical,
+        content: "an alias value that must be ignored entirely",
+        type: "project",
+      });
+      assert.equal(isError, false);
+      const stored = await store.exportAll();
+      assert.equal(stored.length, 1);
+      assert.equal(stored[0].text, canonical.trim(), "text stays canonical");
+    } finally {
+      await close();
+      await cleanup();
+    }
+  });
+
+  it("falls through to an alias when text is present but empty", async () => {
+    const { store, cleanup } = await tempStore();
+    const { client, close } = await connected(store);
+    try {
+      const { isError } = await save(client, { text: "   ", content: LONG_TEXT });
+      assert.equal(isError, false);
+      assert.equal((await store.exportAll())[0].text, LONG_TEXT.trim());
+    } finally {
+      await close();
+      await cleanup();
+    }
+  });
+
+  it("still errors clearly when no alias carries a usable string", async () => {
+    const { store, cleanup } = await tempStore();
+    const { client, close } = await connected(store);
+    try {
+      const { isError, text } = await save(client, { content: 42, memory: null, type: "project" });
+      assert.equal(isError, true);
+      assert.doesNotMatch(text, /too short/);
+      assert.match(text, /"text" is required and must be a non-empty string/);
+      assert.match(text, /received keys: content, memory, type/);
+      assert.equal((await store.exportAll()).length, 0, "nothing was saved");
     } finally {
       await close();
       await cleanup();

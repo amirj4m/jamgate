@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-07-21
+
+### Fixed
+
+- **`save_memory` now accepts the memory under `content` or `memory`, not only `text`**
+  (DECISIONS D-039). Live evidence closed yesterday's mystery: the claude.ai/Cowork client sends
+  the memory as `content`, so our handler saw no `text` at all — which is what produced the
+  empty-text "too short" that 0.7.2 made legible. The text is now resolved from `text`, then
+  `content`, then `memory`, taking the first non-empty string; the gate judges it exactly as if
+  it had arrived under `text`. `text` stays canonical, still wins when both are present, and the
+  aliases are noted in the tool description so agents keep preferring it. When none of the three
+  carries a usable string, the 0.7.2 error is unchanged — clear, and naming every key received.
+
 ## [0.7.3] - 2026-07-21
 
 ### Fixed

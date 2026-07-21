@@ -616,3 +616,43 @@ save and never corrupts the file. The unit file was reviewed and deliberately le
 
 The general rule: when a protocol assigns meaning to a status code, the status code *is* the API.
 A helpful error message is not a substitute for the number the other side is actually reading.
+
+### D-039 — A client that sends `content` still meant to save a memory; accept the alias
+
+The empty-text `save_memory` that D-037 made *legible* is now **explained**: live evidence from a
+claude.ai/Cowork call shows the client sends the memory under `content`, not `text`. Our handler
+read `args.text`, found nothing, and (before D-037) reported the absurd "too short" for a memory
+the agent had just written. D-037 turned that into an honest error naming the received keys —
+correct, but still a dead end for the user, whose memory was simply not saved.
+
+So `save_memory` now resolves its text from `text`, then `content`, then `memory`, taking the
+first that is a non-empty string. `text` remains canonical and wins whenever it is usable; the
+aliases are documented in the `text` field's description so a reading agent keeps preferring the
+canonical name. Everything downstream is unchanged — the gate judges the resolved text exactly as
+if it had arrived under `text`, and there is no special log line or warning, because from the
+gate's point of view nothing unusual happened.
+
+**Considered and rejected: `additionalProperties: false`.** A strict schema would have made this
+failure loud at the SDK layer instead of silent, and that is a real argument — the bug cost a day
+precisely because it was quiet. We still declined it, for three reasons:
+
+1. **It fails the user to teach the client a lesson.** A hard rejection is not more correct than
+   accepting the memory; it is the same non-save with a better error. The user's memory is the
+   thing we exist to keep, and we are the neutral layer *every* agent writes through — a layer
+   whose value proposition is "it just works across clients" cannot be the strictest party in the
+   stack about a field name it can trivially recognise.
+2. **We do not control the clients.** Jamgate is cross-agent by definition (RULES §1). Claude,
+   Cursor, Cowork and whatever ships next all call us; a schema error is a bug report we cannot
+   file and cannot fix, and the user carries it in the meantime.
+3. **Strictness would break more than it catches.** `additionalProperties: false` rejects *any*
+   extra key, so a client that helpfully attaches a `timestamp` or `session_id` would be refused
+   an otherwise perfect save. The failure mode is much wider than the one case it would have
+   caught.
+
+The alias list stays deliberately short and dumb — three exact names, no fuzzy matching, no
+inspecting nested objects. Recognising `content` is compatibility; guessing at arbitrary shapes
+would be the gate deciding what the caller meant, which is not its job. A non-string under an
+alias is still a clear error naming every key received (D-037's message, unchanged).
+
+The general rule: **be strict about what you store, liberal about what you are called with.** The
+quality gate belongs on the memory's content, never on the caller's spelling.
