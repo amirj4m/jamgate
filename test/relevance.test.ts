@@ -2,7 +2,9 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import {
   MIN_RELEVANCE,
+  TYPE_BOOST,
   contentStems,
+  memoryRelevance,
   relevanceScore,
   stem,
   tokenize,
@@ -121,5 +123,62 @@ describe("fuzzy recall relevance set (Phase 3, item 2)", () => {
   it("stays synonym-blind (that is the embedding layer's job, item 4)", () => {
     // "car" vs "automobile" share no morphology — the fuzzy scorer is expected to miss it.
     assert.ok(relevanceScore("automobile", "jam bought a new car") < MIN_RELEVANCE);
+  });
+});
+
+describe("memoryRelevance — subject and type are matchable (D-036)", () => {
+  // The real-world miss this fixes: a desktop chat asked for the user's projects and got
+  // "No matching memories" over a store that held exactly that, because the record's text
+  // never contained the word "project" — it was only in `type` and `subject`.
+  const jamgate = {
+    text: "Shipping a cross-agent memory quality gate as an MCP server",
+    subject: "jamgate-project",
+    type: "project",
+  };
+
+  it("finds a type=project record whose text never says 'project'", () => {
+    assert.ok(
+      relevanceScore("my projects", jamgate.text) < MIN_RELEVANCE,
+      "precondition: text-only scoring misses it (this was the bug)",
+    );
+    assert.ok(
+      memoryRelevance("my projects", jamgate) >= MIN_RELEVANCE,
+      "whole-memory scoring finds it",
+    );
+  });
+
+  it("matches on subject tokens, not just text", () => {
+    assert.ok(memoryRelevance("jamgate", jamgate) >= MIN_RELEVANCE);
+    assert.ok(
+      memoryRelevance("operating system", {
+        text: "jam switched everything over to Ubuntu 24.04",
+        subject: "operating-system",
+      }) >= MIN_RELEVANCE,
+      "a hyphenated subject key is split into ordinary words",
+    );
+  });
+
+  it("the type boost alone is weak — a real word match still ranks higher", () => {
+    const byType = memoryRelevance("projects", { text: "jam went sailing", type: "project" });
+    const byWords = memoryRelevance("projects", jamgate);
+    assert.ok(byType >= MIN_RELEVANCE, "a type match is enough to surface the record");
+    assert.ok(byWords > byType, "but text/subject matches outrank a bare type match");
+    assert.equal(byType, TYPE_BOOST, "a bare type match earns exactly the boost");
+  });
+
+  it("does not flood: an untyped, unrelated memory stays below the floor", () => {
+    assert.ok(
+      memoryRelevance("my projects", { text: "jam lives in Berlin", subject: "location" }) <
+        MIN_RELEVANCE,
+    );
+    assert.ok(
+      memoryRelevance("berlin", jamgate) < MIN_RELEVANCE,
+      "adding subject/type never makes an unrelated memory match",
+    );
+  });
+
+  it("is unchanged from text-only scoring when a memory has no subject or type", () => {
+    const text = "jam prefers TypeScript";
+    assert.equal(memoryRelevance("typescript", { text }), relevanceScore("typescript", text));
   });
 });

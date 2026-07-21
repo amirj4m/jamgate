@@ -601,7 +601,7 @@ for the full scope):
   entries only; conversation logs are never mined.
 
 Verified end-to-end over the MCP protocol (both stdio and HTTP) and covered by an automated
-test suite (211 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
+test suite (217 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
 (trained on the local decision log) and multi-device sync (see [`DECISIONS.md`](./DECISIONS.md)).
 **Goal: impact, not profit — open-source (MIT), built in the open.**
 

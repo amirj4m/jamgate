@@ -141,3 +141,49 @@ export function relevanceScore(query: string, text: string): number {
 
   return TOKEN_WEIGHT * tokenScore + TRIGRAM_WEIGHT * trigramScore;
 }
+
+/** The scoring surface of a stored memory: what it says, what it is *about*, and which
+ *  layer it belongs to. Recall must be able to match on all three (D-036). */
+export interface ScorableMemory {
+  text: string;
+  subject?: string;
+  type?: string;
+}
+
+/** How much a type match on its own is worth. Deliberately small but above `MIN_RELEVANCE`,
+ *  so asking "what are my projects?" surfaces `type: "project"` records that never say the
+ *  word — while ranking them below anything that actually matches on words. */
+export const TYPE_BOOST = 0.15;
+
+/**
+ * Relevance of a stored memory to `query` — the scorer recall should use.
+ *
+ * `relevanceScore` alone looks only at the memory TEXT, which produced a real miss: a record
+ * with `type: "project"` and `subject: "jamgate-project"` whose text never contains the word
+ * "project" scored 0 for the query "my projects", and recall answered "No matching memories"
+ * over a store that plainly held the answer. The structured fields the gate works so hard to
+ * assign were invisible to the very operation that needs them.
+ *
+ * So we score against the text PLUS the subject's words (subject tokens count exactly like
+ * text tokens — a subject is a compressed statement of what the memory is about), and add a
+ * small boost when the query names the memory's type. Still deterministic, still ML-free,
+ * still one pass over short strings.
+ */
+export function memoryRelevance(query: string, memory: ScorableMemory): number {
+  // Subjects are hyphenated keys ("current-project", "operating-system") — split them back
+  // into words so the tokenizer and stemmer see them as ordinary content.
+  const subjectWords = memory.subject ? memory.subject.replace(/[-_]+/g, " ") : "";
+  const field = subjectWords ? `${memory.text} ${subjectWords}` : memory.text;
+
+  const score = relevanceScore(query, field);
+  if (memory.type && queryMentions(query, memory.type)) {
+    return Math.min(1, score + TYPE_BOOST);
+  }
+  return score;
+}
+
+/** True when the query names `word` (stem-equal, so "projects" matches "project"). */
+export function queryMentions(query: string, word: string): boolean {
+  const target = stem(word.toLowerCase());
+  return contentStems(query).includes(target);
+}

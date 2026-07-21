@@ -90,6 +90,40 @@ describe("FileStore recall and forget", () => {
     }
   });
 
+  it("recalls by type and subject, not just text (D-036 regression)", async () => {
+    // Reproduces a real miss: asking for "my projects" returned nothing, even though the
+    // store held a type=project / subject=jamgate-project record — its text just never used
+    // the word. Structured fields the gate assigns must be visible to recall.
+    const { store, cleanup } = await tempStore();
+    try {
+      await store.save({
+        text: "Shipping a cross-agent memory quality gate as an MCP server",
+        type: "project",
+        subject: "jamgate-project",
+        source: "user-explicit",
+      });
+      await store.save({ text: "jam lives in Berlin", subject: "location", source: "user-explicit" });
+
+      const byType = await store.recall("what are my projects?", 5);
+      assert.equal(byType.length, 1, "the project record is found");
+      assert.equal(byType[0].subject, "jamgate-project");
+
+      // Subject tokens are matchable too. (The fuzzy scorer also gives the "jam ..." memory
+      // partial credit for "jamgate" — long-standing morphology behavior — so assert on the
+      // ranking, which is what a caller actually consumes.)
+      const bySubject = await store.recall("jamgate", 5);
+      assert.equal(bySubject[0].subject, "jamgate-project", "the subject match ranks first");
+
+      const unrelated = await store.recall("my projects", 5);
+      assert.ok(
+        unrelated.every((m) => m.subject !== "location"),
+        "an unrelated memory is not dragged in",
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("returns the most recent memories for an empty query", async () => {
     const { store, cleanup } = await tempStore();
     try {

@@ -13,7 +13,7 @@ import {
   type TtlPolicy,
 } from "./ttl.js";
 import { withFileLock } from "./lock.js";
-import { MIN_RELEVANCE, relevanceScore } from "../gate/relevance.js";
+import { memoryRelevance, MIN_RELEVANCE } from "../gate/relevance.js";
 import type { Embedder } from "../embeddings/embedder.js";
 import {
   DEFAULT_DUP_THRESHOLD,
@@ -330,7 +330,8 @@ export class FileStore implements MemoryStore {
     const qVec = await this.embed(q);
 
     const scored = memories.map((m) => {
-      const lexical = relevanceScore(q, m.text);
+      // Score the whole memory — text, subject and type — not just the text (D-036).
+      const lexical = memoryRelevance(q, m);
       const semantic =
         qVec && Array.isArray(m.embedding) ? cosineSimilarity(qVec, m.embedding) : 0;
       const qualifies = lexical >= MIN_RELEVANCE || semantic >= DEFAULT_SEMANTIC_MIN;

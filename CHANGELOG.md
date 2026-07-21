@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-21
+
+### Fixed
+
+- **Recall now scores the whole memory — text *and* `subject` *and* `type` — not just the text**
+  (DECISIONS D-036). A real miss prompted this: asking for "my projects" returned *"No matching
+  memories"* while the store held a `type: "project"` / `subject: "jamgate-project"` record whose
+  text never used the word. Subject keys are split into words (`current-project` →
+  `current project`) and weighted like text tokens; a query naming a memory's type adds a small
+  `0.15` boost, above the relevance floor but always below a genuine word match. Deterministic,
+  dependency-free, and additive — memories without a subject or type score exactly as before, so
+  nothing that used to be found stops being found. Regression tests cover it end-to-end through
+  the store.
+
 ## [0.7.0] - 2026-07-21
 
 **Bring your memory with you.** `jamgate import --from claude|chatgpt` reads the memory list you
@@ -318,7 +332,8 @@ single shared memory clean at write time instead of letting it bloat with junk.
 - Verified end-to-end over the MCP protocol and covered by an automated test suite
   (89 tests) running on Node 20.x and 22.x in CI.
 
-[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/amirj4m/jamgate/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/amirj4m/jamgate/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/amirj4m/jamgate/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/amirj4m/jamgate/compare/v0.4.0...v0.5.0

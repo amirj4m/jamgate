@@ -510,3 +510,25 @@ memories are still recalled. Original dates are preserved so supersession orders
 correctly; `subject` comes from the same `deriveSubject` rules a live save uses; provenance is
 stamped `import:claude.ai` / `import:chatgpt`. And because a hand-pasted list can carry stray
 prose, every line is a *candidate* only — `--dry-run` shows exactly what would land first. Phase 10.
+
+### D-036 — Recall scores the whole memory (text + subject + type), not just the text
+A desktop chat asked Jamgate for the user's **projects** and got *"No matching memories"* — over a
+store that held a record with `type: "project"` and `subject: "jamgate-project"`. The text of that
+record simply never used the word "project", and recall scored **text only**. The gate works hard
+to assign structured fields, and then the one operation that most needs them could not see them.
+That is a design bug, not a tuning problem: the fix belongs in the scorer, not in a threshold.
+
+`memoryRelevance(query, memory)` now scores against the text **plus the subject's words** —
+hyphenated keys (`current-project`, `operating-system`) are split back into ordinary words, so
+subject tokens are weighted exactly like text tokens. A subject is a compressed statement of what
+the memory is about; treating it as second-class was the mistake. On top of that, a query that
+names a memory's **type** adds a small boost (`TYPE_BOOST = 0.15`), deliberately just above
+`MIN_RELEVANCE`: enough that "what are my projects?" surfaces `type: "project"` records whose text
+never says the word, but low enough that a bare type match always ranks below a real word match.
+
+It stays deterministic, ML-free and cheap — one extra short string in the same single pass, no new
+allocation per candidate beyond that. A memory with neither subject nor type scores exactly as
+before, so this is additive: nothing that used to be found stops being found. Semantic reach for
+genuine synonyms remains the optional embedding layer's job (D-026); this is about not throwing
+away structure we already have. Regression tests pin the original miss end-to-end through the
+store, not just at the unit level.
