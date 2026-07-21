@@ -3,6 +3,21 @@
 Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
+- **0.7.2 — production bug from dogfooding: "the gate rejected everything with 'too short',
+  even a 1700-character memory" (2026-07-21; D-037).** The text had never reached the gate:
+  `String(args.text ?? "")` turned a missing/misnamed `text` into `""` and the prefilter judged
+  the empty string. Reproduced over the live HTTP path (long text saves fine → no transport
+  regression; `{content: "..."}` and `{}` both produced "too short"). **Second, worse bug found
+  while reproducing:** `text: {type:"text", text:"…"}` stringified to the literal
+  `"[object Object]"` and was SAVED through the gate as a success. Fixes: validate the argument
+  before judging the memory (missing/empty/non-string `text` → MCP `isError` result naming the
+  required field AND the keys that arrived; not gate-logged, since a client mismatch is not a
+  memory judgement); prefilter reasons carry the measured length; **gate log defaults next to
+  the store** (`JAMGATE_STORE` dir) — the old `~/.jamgate` default had been failing with ENOENT
+  under systemd `ProtectHome`, so the audit trail was empty exactly when this bug needed it.
+  226 tests. Published; droplet on 0.7.2, verified live: 1740-char save through
+  memory.amirj4m.com → Saved (then forgotten, store back to 1 record), missing-arg → clear
+  error, and `/var/lib/jamgate/gate.log` is now actually being written.
 - **0.7.1 — recall scores subject + type, not just text (2026-07-21; D-036).** A live desktop
   chat asked for "my projects" and got "No matching memories" while the store held a
   `type: project` / `subject: jamgate-project` record whose TEXT never used the word. Recall now
