@@ -298,6 +298,10 @@ async function handleRequest(
     if (!transport) {
       if (isInitializeRequest(body)) {
         // New session: spin up a fresh transport + its own server, sharing the store.
+        // Note we accept an initialize even when it still carries a stale `Mcp-Session-Id`
+        // header. The spec has the client re-initialize *without* one, but a client that
+        // forgets to strip it is trying to do exactly the right thing; answering 404 to its
+        // recovery attempt would strand it for good. It gets a brand-new session id back.
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sid) => {
@@ -310,13 +314,18 @@ async function handleRequest(
         };
         const server = createServer(ctx.store, ctx.gateLog);
         await server.connect(transport);
+      } else if (sessionId) {
+        sendSessionNotFound(res);
+        return;
       } else {
-        // Not an initialize and no known session → the client must initialize first.
+        // No session id at all and not an initialize → the client must initialize first.
+        // Streamable HTTP §Session Management point 2: a server that requires a session id
+        // SHOULD answer 400 Bad Request here. This is NOT the expired-session case.
         sendJson(res, 400, {
           jsonrpc: "2.0",
           error: {
             code: -32000,
-            message: "Bad Request: no valid session id; send an initialize request first",
+            message: "Bad Request: no session id; send an initialize request first",
           },
           id: null,
         });
@@ -332,11 +341,15 @@ async function handleRequest(
     // GET opens the server→client SSE stream; DELETE ends the session. Both need a session.
     const transport = sessionId ? ctx.transports.get(sessionId) : undefined;
     if (!transport) {
-      sendJson(res, 400, {
-        jsonrpc: "2.0",
-        error: { code: -32000, message: "Bad Request: unknown or missing session id" },
-        id: null,
-      });
+      if (sessionId) {
+        sendSessionNotFound(res);
+      } else {
+        sendJson(res, 400, {
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Bad Request: missing session id" },
+          id: null,
+        });
+      }
       return;
     }
     await transport.handleRequest(req, res);
@@ -347,6 +360,35 @@ async function handleRequest(
   sendJson(res, 405, {
     jsonrpc: "2.0",
     error: { code: -32000, message: `Method ${req.method} not allowed` },
+    id: null,
+  });
+}
+
+/**
+ * Answer a request that carries an `Mcp-Session-Id` we don't know (D-038).
+ *
+ * Sessions live in this process's memory, so every restart of the service — a deploy, a
+ * crash, an OOM kill — silently invalidates every session id its clients are still holding.
+ * The MCP Streamable HTTP spec has one recovery path for exactly this, and it is a status
+ * code: "The server MAY terminate the session at any time, after which it MUST respond to
+ * requests containing that session ID with HTTP 404 Not Found", and "When a client receives
+ * HTTP 404 in response to a request containing an Mcp-Session-Id, it MUST start a new session
+ * by sending a new InitializeRequest without a session ID attached."
+ *
+ * We used to answer 400 here. A conforming client (claude.ai) reads 400 as "that request was
+ * malformed", not "your session is gone", so it never re-handshakes — the conversation stays
+ * wedged on a dead session id until the user restarts the client. The 404 is the signal that
+ * makes recovery automatic and invisible; it is the entire fix.
+ */
+function sendSessionNotFound(res: ServerResponse): void {
+  sendJson(res, 404, {
+    jsonrpc: "2.0",
+    error: {
+      code: -32001,
+      message:
+        "Session not found: this session id is unknown or expired (the server may have " +
+        "restarted). Send a new initialize request without a session id to start a new session.",
+    },
     id: null,
   });
 }

@@ -564,3 +564,55 @@ Three fixes, and the shape of them is the point:
 The general rule this encodes: the gate answers "is this worth remembering?" — it must never be
 handed a question it cannot answer and made to guess. Malformed input gets a straight answer about
 the input. Phase 10.
+
+### D-038 — An expired session is a 404, because 404 is the only word a client understands
+
+Third bug found by real use in one day. A claude.ai conversation had a working session — recall
+returned memories — then the droplet's `jamgate.service` restarted for a deploy. Every subsequent
+`save_memory` in the *same* conversation failed with "session expired" / "Not connected", and the
+client never came back: asking it to disconnect and reconnect did not help either.
+
+Sessions live in this process's memory, so a restart invalidates every session id in the wild.
+That part is fine and expected — the Streamable HTTP spec plans for exactly it, and the recovery
+handshake is triggered by a *status code*:
+
+> The server MAY terminate the session at any time, after which it MUST respond to requests
+> containing that session ID with HTTP 404 Not Found. …When a client receives HTTP 404 in
+> response to a request containing an `Mcp-Session-Id`, it MUST start a new session by sending a
+> new `InitializeRequest` without a session ID attached.
+
+We answered **400** with `"no valid session id; send an initialize request first"`. The message
+was addressed to a human reading a log; the client only reads the code, and 400 means "your
+request was malformed" — a fact about *this* request, not about the session. So there was nothing
+to recover from, and the conversation stayed wedged on a dead session id until it was abandoned.
+The prose was right and the number was wrong, and only the number was load-bearing.
+
+The fix separates two cases that had been collapsed into one:
+
+- **Session id present but unknown** → `404`. The client re-initializes automatically; the user
+  sees nothing at all. This is the whole bug.
+- **No session id, and not an `initialize`** → still `400`, per the same section's point 2. This
+  is a genuinely malformed request and must not be told to "retry with a new session".
+
+Both apply on POST, GET (the SSE stream) and DELETE. The auth gate keeps running first, so a
+*wrong* token with a dead session is still `401` — an expired session must never become an oracle
+that answers questions to an unauthenticated caller — while a *valid* token with a dead session
+gets the 404 rather than having it masked as an auth failure.
+
+We also accept an `initialize` that still carries a stale session id, and issue a fresh id. A
+strict reading would 404 that too (it "contains that session ID"), but a client sending an
+initialize is already trying to do the right thing; refusing its recovery attempt would strand it
+permanently, which is the precise failure we are fixing.
+
+**Deliberately not done: graceful shutdown / session persistence.** Both were considered and both
+make things worse. Persisting sessions to disk cannot work — a session owns a live server object
+and an open stream, not a serializable row — and the 404 re-init is the standard path anyway. A
+`SIGTERM` handler awaiting `httpServer.close()` would *hang*: idle GET/SSE streams keep the server
+open indefinitely, so systemd would wait out `TimeoutStopSec` and `SIGKILL` us — turning an
+instant restart into a 90-second one, and lengthening exactly the window this bug lives in. There
+is also nothing that needs draining: store writes are atomic renames under a file lock whose stale
+entries are stolen after 30s (D-010), so a hard kill mid-write loses at most the one in-flight
+save and never corrupts the file. The unit file was reviewed and deliberately left unchanged.
+
+The general rule: when a protocol assigns meaning to a status code, the status code *is* the API.
+A helpful error message is not a substitute for the number the other side is actually reading.

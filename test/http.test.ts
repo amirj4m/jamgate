@@ -322,3 +322,202 @@ describe("HTTP transport: concurrent sessions share one store safely", () => {
     }
   });
 });
+
+/**
+ * Session resilience across a server restart (D-038).
+ *
+ * Sessions live in process memory, so every deploy invalidates every session id the clients
+ * out there are still holding. The spec's recovery path is a status code: an unknown
+ * `Mcp-Session-Id` MUST get 404, which is what tells a client to re-initialize. We answered
+ * 400, which reads as "bad request" — so claude.ai stayed wedged on a dead session for the
+ * rest of the conversation. These tests pin the 404 down, and pin down that it is not
+ * conflated with the *missing*-session-id case (still 400) or masked by the auth gate.
+ */
+describe("HTTP transport: session expiry after a restart", () => {
+  const INIT_BODY = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "claude-ai", version: "1.0.0" },
+    },
+  };
+  const MCP_HEADERS = {
+    "Content-Type": "application/json",
+    Accept: "application/json, text/event-stream",
+  };
+
+  /** Raw initialize over fetch, so the test controls the session id by hand afterwards. */
+  async function rawInitialize(
+    url: string,
+    token: string,
+    sessionId?: string,
+  ): Promise<{ status: number; sessionId: string | null }> {
+    const headers: Record<string, string> = {
+      ...MCP_HEADERS,
+      Authorization: `Bearer ${token}`,
+    };
+    if (sessionId) headers["mcp-session-id"] = sessionId;
+    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(INIT_BODY) });
+    await res.text(); // drain the response stream so the socket can close
+    return { status: res.status, sessionId: res.headers.get("mcp-session-id") };
+  }
+
+  /** A tools/list POST carrying an explicit session id. */
+  function rawCall(url: string, token: string, sessionId: string): Promise<Response> {
+    return fetch(url, {
+      method: "POST",
+      headers: { ...MCP_HEADERS, Authorization: `Bearer ${token}`, "mcp-session-id": sessionId },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+    });
+  }
+
+  const DEAD = "11111111-2222-3333-4444-555555555555";
+
+  it("answers 404 — not 400 — to a POST carrying an unknown session id", async () => {
+    const { url, cleanup } = await bootServer();
+    try {
+      const res = await rawCall(url, TOKEN, DEAD);
+      assert.equal(res.status, 404, "404 is what tells a conforming client to re-initialize");
+      await res.text();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("explains in the 404 body that the client should re-initialize", async () => {
+    const { url, cleanup } = await bootServer();
+    try {
+      const res = await rawCall(url, TOKEN, DEAD);
+      const body = await res.json();
+      assert.equal(body.jsonrpc, "2.0");
+      assert.match(body.error.message, /initialize/i);
+      assert.match(body.error.message, /expired|unknown/i);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("answers 404 to a GET (SSE stream) with an unknown session id", async () => {
+    const { url, cleanup } = await bootServer();
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Accept: "text/event-stream", Authorization: `Bearer ${TOKEN}`, "mcp-session-id": DEAD },
+      });
+      assert.equal(res.status, 404);
+      await res.text();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("answers 404 to a DELETE with an unknown session id", async () => {
+    const { url, cleanup } = await bootServer();
+    try {
+      const res = await fetch(url, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${TOKEN}`, "mcp-session-id": DEAD },
+      });
+      assert.equal(res.status, 404);
+      await res.text();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("still answers 400 when there is no session id at all (a different bug)", async () => {
+    const { url, cleanup } = await bootServer();
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { ...MCP_HEADERS, Authorization: `Bearer ${TOKEN}` },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+      });
+      assert.equal(res.status, 400, "missing session id is 400 per spec; expired is 404");
+      await res.text();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("does not let the auth gate mask it: valid token + dead session is 404, never 401", async () => {
+    const { url, cleanup } = await bootServer();
+    try {
+      const res = await rawCall(url, TOKEN, DEAD);
+      assert.equal(res.status, 404);
+      assert.equal(res.headers.get("www-authenticate"), null);
+      await res.text();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("keeps auth first: a WRONG token with a dead session is still 401, not 404", async () => {
+    const { url, cleanup } = await bootServer();
+    try {
+      const res = await rawCall(url, "the-wrong-token", DEAD);
+      assert.equal(res.status, 401, "a dead session must never become an auth bypass oracle");
+      await res.text();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("accepts an initialize that still carries a stale session id, issuing a fresh one", async () => {
+    const { url, cleanup } = await bootServer();
+    try {
+      const { status, sessionId } = await rawInitialize(url, TOKEN, DEAD);
+      assert.equal(status, 200);
+      assert.ok(sessionId, "a new session id must be issued");
+      assert.notEqual(sessionId, DEAD);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("survives a real restart: old session 404s, then a fresh session saves to the same store", async () => {
+    // Server A — the instance the client originally handshook with.
+    const { store, path, cleanup } = await tempStore();
+    const a = await startHttpServer({ store, token: TOKEN, port: 0, gateLog: NO_GATE_LOG });
+    const urlA = `http://${a.host}:${a.port}${a.path}`;
+    const { sessionId } = await rawInitialize(urlA, TOKEN);
+    assert.ok(sessionId, "server A issued a session id");
+
+    // The deploy: the process goes away and comes back over the same store on the same port.
+    await a.close();
+    const b = await startHttpServer({
+      store: new FileStore(path),
+      token: TOKEN,
+      port: a.port,
+      gateLog: NO_GATE_LOG,
+    });
+    const urlB = `http://${b.host}:${b.port}${b.path}`;
+
+    let client: Client | undefined;
+    try {
+      // The client is still holding the pre-restart session id. This is the wedged state.
+      const stale = await rawCall(urlB, TOKEN, sessionId!);
+      assert.equal(stale.status, 404, "the restarted server must tell the client to re-initialize");
+      await stale.text();
+
+      // Which is what a conforming client does next — and it must be fully working again.
+      ({ client } = await connectClient(urlB, TOKEN));
+      const saved = await client.callTool({
+        name: "save_memory",
+        arguments: { text: "jam redeployed jamgate mid-conversation", source: "user-explicit" },
+      });
+      assert.match((saved.content as Array<{ text: string }>)[0].text, /^Saved:/);
+
+      // And the memory really landed in the shared store, not just in the response.
+      const [stored] = await new FileStore(path).recall("redeployed", 5);
+      assert.match(stored.text, /redeployed jamgate/);
+    } finally {
+      if (client) await client.close();
+      await b.close();
+      await cleanup();
+    }
+  });
+});

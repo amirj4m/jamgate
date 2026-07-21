@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-07-21
+
+### Fixed
+
+- **A remote session now recovers by itself when the server restarts** (DECISIONS D-038).
+  Reported from real use: a claude.ai conversation had a working session, the self-hosted service
+  restarted for a deploy, and every later `save_memory` in that same conversation failed with
+  "session expired" / "Not connected" — the client never re-handshaked, even when asked to
+  reconnect. Sessions live in process memory, so a restart invalidates every session id in the
+  wild; the MCP Streamable HTTP spec makes **HTTP 404** the signal that tells a client to start a
+  new session, and we were answering **400**. A client reads 400 as "that request was malformed",
+  so it had nothing to recover from. An unknown or expired `Mcp-Session-Id` now gets a
+  spec-compliant 404 on POST, GET and DELETE, and conforming clients (claude.ai) re-initialize
+  transparently — the user sees nothing.
+- **A missing session id is no longer confused with an expired one.** A request with no
+  `Mcp-Session-Id` that isn't an `initialize` is still 400, per the same section of the spec —
+  that one really is malformed and must not be told to retry with a new session.
+- **The auth gate can't mask the 404.** A valid token with a dead session gets the 404, not a
+  401; a *wrong* token with a dead session is still 401, so an expired session never becomes an
+  oracle for unauthenticated callers.
+- **An `initialize` that still carries a stale session id is accepted** and issued a fresh id,
+  rather than being refused mid-recovery.
+
 ## [0.7.2] - 2026-07-21
 
 ### Fixed
