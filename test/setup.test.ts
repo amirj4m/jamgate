@@ -18,6 +18,7 @@ import {
   runStatus,
   type ClaudeCli,
 } from "../src/setup/runner.js";
+import { parseSetupArgs } from "../src/setup/cli.js";
 
 /** A throwaway home directory for a single test, with cleanup. */
 async function tempHome(): Promise<{ home: string; env: NodeJS.ProcessEnv; cleanup: () => Promise<void> }> {
@@ -58,6 +59,20 @@ function fakeClaudeCli(overrides: Partial<ClaudeCli> = {}): ClaudeCli & { calls:
     previewCommand: overrides.previewCommand ?? ((spec) => `claude mcp add (${spec.mode})`),
   };
 }
+
+describe("parseSetupArgs", () => {
+  it("parses --force (default off)", () => {
+    assert.equal(parseSetupArgs([], {}).force, false);
+    assert.equal(parseSetupArgs(["--force"], {}).force, true);
+  });
+
+  it("keeps --force independent of transport (stdio default)", () => {
+    const parsed = parseSetupArgs(["--force"], {});
+    assert.equal(parsed.mode, "stdio");
+    assert.equal(parsed.force, true);
+    assert.equal(parsed.error, undefined);
+  });
+});
 
 describe("buildEntry / server entry shapes", () => {
   it("builds a bare npx stdio entry for Cursor", () => {
@@ -353,6 +368,139 @@ describe("runSetup (against a temp home)", () => {
       type: "stdio",
       env: {},
     });
+  });
+
+  // --- Transport-downgrade guard (D-047) ---------------------------------------------------
+
+  /** Seed Claude Code's config with a remote (HTTP) jamgate wiring and return its path. */
+  async function seedRemoteClaudeCode(home: string): Promise<string> {
+    const path = join(home, ".claude.json");
+    await fs.writeFile(
+      path,
+      JSON.stringify({
+        mcpServers: {
+          jamgate: { type: "http", url: "https://mem.example.com/mcp", headers: { Authorization: "Bearer tok" } },
+          keep: { command: "k" },
+        },
+      }),
+      "utf8",
+    );
+    return path;
+  }
+
+  it("preserves a remote wiring on a plain (stdio) run instead of downgrading it", async () => {
+    const { home, env, cleanup } = await tempHome();
+    cleanups.push(cleanup);
+    const path = await seedRemoteClaudeCode(home);
+
+    const results = await runSetup({
+      mode: "stdio",
+      dryRun: false,
+      platform: "linux",
+      env,
+      only: ["claude-code"],
+      // No CLI: the JSON-merge path is where the guard lives; it must fire before any write.
+    });
+    assert.equal(results[0].outcome, "preserved");
+    assert.equal(results[0].transport, "remote");
+    assert.match(results[0].detail ?? "", /--remote/);
+    assert.match(results[0].detail ?? "", /--force/);
+
+    // The file is untouched (still remote, neighbour intact) and no backup was spawned.
+    const cfg = await readJson(path);
+    assert.equal(cfg.mcpServers.jamgate.url, "https://mem.example.com/mcp");
+    assert.deepEqual(cfg.mcpServers.keep, { command: "k" });
+    assert.ok(!(await exists(path + BACKUP_SUFFIX)));
+  });
+
+  it("does not let the claude CLI overwrite a remote wiring on a plain run", async () => {
+    const { home, env, cleanup } = await tempHome();
+    cleanups.push(cleanup);
+    await seedRemoteClaudeCode(home);
+    const cli = fakeClaudeCli();
+
+    const results = await runSetup({
+      mode: "stdio",
+      dryRun: false,
+      platform: "linux",
+      env,
+      only: ["claude-code"],
+      claudeCli: cli,
+    });
+    assert.equal(results[0].outcome, "preserved");
+    // The guard fires before we ever reach the CLI add path.
+    assert.equal(cli.calls.length, 0);
+  });
+
+  it("upgrades a stdio wiring to remote automatically (the desired flow)", async () => {
+    const { home, env, cleanup } = await tempHome();
+    cleanups.push(cleanup);
+    const path = join(home, ".claude.json");
+    await fs.writeFile(
+      path,
+      JSON.stringify({ mcpServers: { jamgate: { command: "npx", args: ["jamgate"], type: "stdio", env: {} } } }),
+      "utf8",
+    );
+
+    const results = await runSetup({
+      mode: "remote",
+      url: "https://mem.example.com/mcp",
+      token: "tok",
+      dryRun: false,
+      platform: "linux",
+      env,
+      only: ["claude-code"],
+    });
+    assert.equal(results[0].outcome, "updated");
+    const cfg = await readJson(path);
+    assert.deepEqual(cfg.mcpServers.jamgate, {
+      type: "http",
+      url: "https://mem.example.com/mcp",
+      headers: { Authorization: "Bearer tok" },
+    });
+  });
+
+  it("--force overrides the guard and downgrades a remote wiring to stdio", async () => {
+    const { home, env, cleanup } = await tempHome();
+    cleanups.push(cleanup);
+    const path = await seedRemoteClaudeCode(home);
+
+    const results = await runSetup({
+      mode: "stdio",
+      dryRun: false,
+      platform: "linux",
+      env,
+      only: ["claude-code"],
+      force: true,
+    });
+    assert.equal(results[0].outcome, "updated");
+    assert.ok(results[0].backedUp);
+    const cfg = await readJson(path);
+    assert.deepEqual(cfg.mcpServers.jamgate, { command: "npx", args: ["jamgate"], type: "stdio", env: {} });
+    assert.deepEqual(cfg.mcpServers.keep, { command: "k" }); // neighbour preserved
+  });
+
+  it("leaves same-transport idempotency unchanged (remote re-run is already-configured)", async () => {
+    const { home, env, cleanup } = await tempHome();
+    cleanups.push(cleanup);
+    const path = join(home, ".claude.json");
+    // Seed an empty config so Claude Code is detected without a CLI on the first run.
+    await fs.writeFile(path, JSON.stringify({ mcpServers: {} }), "utf8");
+    const opts = {
+      mode: "remote" as const,
+      url: "https://mem.example.com/mcp",
+      token: "tok",
+      dryRun: false,
+      platform: "linux" as const,
+      env,
+      only: ["claude-code" as const],
+    };
+    await runSetup(opts);
+    // Drop the first run's legitimate backup so we can assert the second run writes nothing.
+    await fs.rm(path + BACKUP_SUFFIX, { force: true });
+    const second = await runSetup(opts);
+    assert.equal(second[0].outcome, "already-configured");
+    assert.ok(!(await exists(path + BACKUP_SUFFIX)));
   });
 
   it("uses JSON merge for Claude Code when no CLI is available", async () => {

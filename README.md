@@ -101,11 +101,14 @@ npx jamgate setup
 
 It is **safe to run**: idempotent (running it twice changes nothing), it never touches any
 server entry but its own, and it backs up each config file to `<file>.jamgate-backup` before
-writing. Useful flags:
+writing. A plain `setup` (local stdio) will also **never silently overwrite a remote (`--remote`)
+wiring** — it leaves that client as-is and tells you so; pass `--force` to downgrade it on
+purpose. Useful flags:
 
 ```bash
 npx jamgate setup --dry-run                          # show what would change, write nothing
 npx jamgate setup --remote https://you/mcp --token … # wire HTTP transport (see Remote mode)
+npx jamgate setup --force                             # overwrite even a remote wiring with local stdio
 npx jamgate status                                    # show which clients are wired + where the store lives
 ```
 

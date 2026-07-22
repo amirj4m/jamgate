@@ -37,13 +37,17 @@ export interface ParsedSetupArgs {
   token?: string;
   dryRun: boolean;
   only?: ClientId[];
+  /** Overwrite even when it would downgrade a remote wiring to local stdio (see D-047). */
+  force?: boolean;
   /** A fatal argument error to report instead of running. */
   error?: string;
 }
 
-/** Parse `setup` flags: `--dry-run`, `--remote <url>`, `--token <token>`, `--client <id>...`. */
+/** Parse `setup` flags: `--dry-run`, `--remote <url>`, `--token <token>`, `--client <id>...`,
+ *  `--force`. */
 export function parseSetupArgs(argv: readonly string[], env: NodeJS.ProcessEnv): ParsedSetupArgs {
   let dryRun = false;
+  let force = false;
   let url: string | undefined;
   let token: string | undefined = env.JAMGATE_TOKEN;
   const only: ClientId[] = [];
@@ -52,6 +56,8 @@ export function parseSetupArgs(argv: readonly string[], env: NodeJS.ProcessEnv):
     const arg = argv[i];
     if (arg === "--dry-run") {
       dryRun = true;
+    } else if (arg === "--force") {
+      force = true;
     } else if (arg === "--remote") {
       url = argv[++i];
       if (!url) return { mode: "remote", dryRun, error: "--remote requires a URL argument" };
@@ -85,7 +91,7 @@ export function parseSetupArgs(argv: readonly string[], env: NodeJS.ProcessEnv):
     };
   }
 
-  return { mode, url, token, dryRun, only: only.length ? only : undefined };
+  return { mode, url, token, dryRun, force, only: only.length ? only : undefined };
 }
 
 /** The real `claude` CLI adapter. `isAvailable` probes `claude --version`; `add` shells out to
@@ -127,6 +133,7 @@ const SYMBOL: Record<ClientResult["outcome"], string> = {
   configured: "✓",
   updated: "✓",
   "already-configured": "•",
+  preserved: "•",
   "not-found": "–",
   skipped: "–",
   error: "✗",
@@ -141,6 +148,8 @@ function describe(r: ClientResult): string {
       return `${r.dryRun ? "would update" : "updated"} (${r.transport})`;
     case "already-configured":
       return "already configured";
+    case "preserved":
+      return "left as-is";
     case "not-found":
       return "not found";
     case "skipped":
@@ -156,7 +165,13 @@ export function formatSetupReport(results: ClientResult[], opts: { dryRun: boole
   lines.push(opts.dryRun ? "jamgate setup — dry run (no files written)\n" : "jamgate setup\n");
   for (const r of results) {
     let line = `  ${SYMBOL[r.outcome]} ${r.label.padEnd(15)} ${describe(r)}`;
-    if (r.detail && (r.outcome === "not-found" || r.outcome === "skipped" || r.outcome === "error")) {
+    if (
+      r.detail &&
+      (r.outcome === "not-found" ||
+        r.outcome === "skipped" ||
+        r.outcome === "preserved" ||
+        r.outcome === "error")
+    ) {
       line += ` — ${r.detail}`;
     }
     lines.push(line);
@@ -226,6 +241,7 @@ export async function setupCommand(
     token: parsed.token,
     dryRun: parsed.dryRun,
     only: parsed.only,
+    force: parsed.force,
     platform: deps.platform,
     env,
     claudeCli: deps.claudeCli ?? realClaudeCli,

@@ -48,6 +48,7 @@ export type Outcome =
   | "configured"
   | "already-configured"
   | "updated"
+  | "preserved"
   | "not-found"
   | "skipped"
   | "error";
@@ -79,13 +80,29 @@ export interface SetupOptions {
   claudeCli?: ClaudeCli;
   /** Restrict the run to specific clients (defaults to all). */
   only?: ClientId[];
+  /** Overwrite even when it would downgrade a remote (HTTP) wiring back to local stdio. Off by
+   *  default: a plain `jamgate setup` never silently un-does a `--remote` install (D-047). */
+  force?: boolean;
 }
 
 /** Does a wired entry describe a remote (HTTP) transport? Remote entries carry a URL field —
  *  `url`, or a client-specific alias (`httpUrl` for Gemini, `serverUrl` for Windsurf) — whereas
- *  stdio entries carry `command`. Used only for status reporting. */
+ *  stdio entries carry `command`. Used for status reporting and the downgrade guard (D-047). */
 function isRemoteEntry(entry: Record<string, unknown>): boolean {
   return "url" in entry || "httpUrl" in entry || "serverUrl" in entry;
+}
+
+/** Extract the currently-wired jamgate entry from a parsed config, if any (else undefined). */
+function currentEntry(
+  existing: unknown,
+  containerKey: string,
+  serverKey: string,
+): Record<string, unknown> | undefined {
+  if (!existing || typeof existing !== "object") return undefined;
+  const container = (existing as Record<string, unknown>)[containerKey];
+  if (!container || typeof container !== "object") return undefined;
+  const entry = (container as Record<string, unknown>)[serverKey];
+  return entry && typeof entry === "object" ? (entry as Record<string, unknown>) : undefined;
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -147,7 +164,7 @@ async function isDetected(
 async function configureClient(
   client: ClientDef,
   opts: Required<Pick<SetupOptions, "mode" | "dryRun">> &
-    Pick<SetupOptions, "url" | "token" | "claudeCli">,
+    Pick<SetupOptions, "url" | "token" | "claudeCli" | "force">,
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
 ): Promise<ClientResult> {
@@ -198,6 +215,24 @@ async function configureClient(
       ...base,
       outcome: "skipped",
       detail: `existing config isn't plain JSON (comments?) — add jamgate to ${client.containerKey} manually to keep it intact`,
+    };
+  }
+
+  // Transport-downgrade guard (D-047): if this run would overwrite an existing REMOTE (HTTP)
+  // wiring with a local stdio one, don't do it silently — a plain `jamgate setup` (stdio default)
+  // must not un-do a deliberate `--remote` install and re-fragment the user's memory. Preserve
+  // the existing entry and report it, unless `--force` is set. The reverse direction (stdio entry,
+  // `--remote` run) is a genuine upgrade the user is explicitly requesting via the flag, so it
+  // falls through to the normal update path below.
+  const wired = currentEntry(existing, client.containerKey, client.serverKey);
+  if (wired && !opts.force && isRemoteEntry(wired) && opts.mode !== "remote") {
+    return {
+      ...base,
+      transport: "remote",
+      outcome: "preserved",
+      detail:
+        "currently remote — re-run with --remote <url> to update it, or --force to overwrite " +
+        "with a local stdio entry",
     };
   }
 
@@ -262,6 +297,7 @@ export async function runSetup(opts: SetupOptions): Promise<ClientResult[]> {
             url: opts.url,
             token: opts.token,
             claudeCli: opts.claudeCli,
+            force: opts.force,
           },
           platform,
           env,

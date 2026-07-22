@@ -910,3 +910,31 @@ path would have rewritten that file down to just our entry. For `sharedConfig` c
 runner now **refuses** to overwrite a file it can't parse as strict JSON, and skips with a
 "configure manually" reason. A dedicated MCP-only file (Cursor, Cline, …) keeps the tolerant
 behaviour, because there the backup already covers the only thing at risk.
+
+### D-047 — A plain `setup` must not silently downgrade a remote wiring
+
+Real UX finding from a live run. A user had wired Claude Code to his self-hosted server over
+HTTP (`--remote`). Later he ran a plain `npx jamgate setup` (stdio is the default), and it
+cheerfully "updated (stdio)" his entry — silently swapping the remote transport back to a local
+`npx jamgate`, which points at a *different, empty* memory store. His memory looked like it had
+vanished; really it had re-fragmented across two backends. The write was idempotent, backed up,
+and touched only our own key — every D-030 safety guarantee held — and it was still wrong,
+because "safe to overwrite our own entry" is not the same as "safe to change its transport".
+
+The distinction that matters is **direction**:
+
+- **remote entry, stdio run** — a *downgrade*. The plain default (no flags) can't know the user
+  wanted to abandon their server; the overwhelmingly likely truth is they forgot to pass
+  `--remote`. So the runner now **preserves** the existing entry and reports it
+  (`• Claude Code — left as-is — currently remote …`) instead of writing. `--force` overrides
+  for the genuine "yes, downgrade me" case.
+- **stdio entry, `--remote` run** — an *upgrade*, and one the user is explicitly asking for by
+  typing the flag. That stays automatic (`updated`); guarding it would just nag.
+- **same transport** — unchanged: idempotent re-run or a normal in-place update.
+
+The guard keys off the *shape already on disk* (`isRemoteEntry`: a `url`/`httpUrl`/`serverUrl`
+field), not off what we remember writing, so it protects a hand-wired remote entry too. It is
+strictly a refusal to write; it never edits the file, so no backup is spawned and idempotency is
+untouched. The lesson generalises D-030: the safe unit isn't "our key" but "our key *and its
+transport*" — changing how a client reaches its memory is as consequential as changing which
+memories it sees.

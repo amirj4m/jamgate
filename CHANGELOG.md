@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-07-22
+
+### Fixed
+
+- **`jamgate setup` no longer silently downgrades a remote wiring to local stdio** (D-047).
+  A user who had wired Claude Code to his self-hosted server with `--remote` later ran a plain
+  `npx jamgate setup` (stdio is the default) and it "updated (stdio)" his entry — quietly
+  swapping the HTTP transport back to a local `npx jamgate` that points at a *different, empty*
+  store, so his memory appeared to vanish (really it re-fragmented across two backends). The
+  write was idempotent, backed up, and touched only our own key — every safety guarantee held —
+  and it was still wrong. The runner now treats a transport change as consequential:
+  - **remote entry + plain (stdio) run** → the existing entry is **preserved** and reported
+    (`• Claude Code — left as-is — currently remote …`) rather than overwritten.
+  - **stdio entry + `--remote` run** → still an automatic upgrade (the user asked for it via the
+    flag), unchanged.
+  - **same transport** → unchanged: idempotent re-run or normal in-place update.
+- **New `--force` flag** for `jamgate setup`, to overwrite a remote wiring with local stdio on
+  purpose. The guard keys off the shape already on disk, so it protects a hand-wired remote
+  entry too, and it only ever *declines* to write — no file is edited, no backup spawned.
+
 ## [0.9.1] - 2026-07-22
 
 ### Fixed
