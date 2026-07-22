@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`memory-discipline` agent skill** at `skills/memory-discipline/SKILL.md`. A portable
+  [agentskills.io](https://agentskills.io) instruction pack that teaches an agent *how* to
+  use the three tools well — recall before answering, save one granular durable fact per
+  call with a specific reused `subject`, choose `type`/`source` honestly, never send
+  secrets, and treat `duplicate`/`rejected`/`possible_duplicate` as correct outcomes rather
+  than errors to retry. Rules are distilled from the D-040…D-045 stress-test decisions.
+  Installable with `npx skills add amirj4m/jamgate`. It is prompt text, deliberately kept
+  **out** of the npm tarball (the `files` whitelist still ships only `dist`), so it adds
+  nothing to the runtime install.
+
 ### Fixed
 
 - **The `possible_duplicate` message no longer tells an agent to add a `subject` it already

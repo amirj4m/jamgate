@@ -167,6 +167,25 @@ Your memory lives in `~/.jamgate/memory.json`. Same machine, every agent → one
 memory. To share one memory across **different** machines and your phone, see
 [Remote mode](#remote-mode-self-hosted).
 
+## Agent skill: `memory-discipline`
+
+Wiring in the three tools gives an agent the *ability* to remember. The
+**`memory-discipline`** skill teaches it the *habits* — recall before answering,
+save one granular durable fact at a time with a specific reused `subject`, never send
+secrets, and treat gate verdicts as answers rather than errors to retry. Its rules are
+distilled straight from Jamgate's own [decision log](./DECISIONS.md) (D-040…D-045).
+
+It ships in this repo at [`skills/memory-discipline/SKILL.md`](./skills/memory-discipline/SKILL.md)
+as a portable [agentskills.io](https://agentskills.io) instruction pack, installable into
+70+ coding agents with one command:
+
+```bash
+npx skills add amirj4m/jamgate
+```
+
+The skill is prompt text, not code — it is **not** part of the npm package (the
+`files` whitelist ships only `dist`), so it never bloats the runtime install.
+
 ## Optional: local semantic search
 
 By default, recall is **fuzzy lexical** matching (stemming, typo-tolerance, trigrams) —
