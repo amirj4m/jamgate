@@ -5,8 +5,9 @@ import type { ServerEntry } from "./clients.js";
  * reads the file, calls this to compute the new document + what changed, then writes it back.
  *
  * Invariants (the safety contract of `jamgate setup`):
- *  - We only ever touch our own `mcpServers.<key>` entry. Every other server and every other
- *    top-level field in the file is preserved byte-for-byte.
+ *  - We only ever touch our own `<container>.<key>` entry (container is `mcpServers` for most
+ *    clients, but `servers`/`context_servers`/`mcp` for VS Code/Zed/OpenCode). Every other
+ *    server and every other top-level field in the file is preserved byte-for-byte.
  *  - Merging is idempotent: writing the same entry again is a no-op ("already-configured").
  *  - A malformed / non-object existing config is treated as "start fresh" rather than throwing,
  *    but the runner still backs up the original file before overwriting it.
@@ -55,18 +56,21 @@ export function deepEqual(a: unknown, b: unknown): boolean {
  *                  nothing we can't understand — the caller backs up first).
  * @param key       The server key to manage (always "jamgate").
  * @param entry     The desired server entry.
+ * @param container The top-level key the servers live under ("mcpServers" for most clients;
+ *                  "servers"/"context_servers"/"mcp" for VS Code/Zed/OpenCode).
  */
 export function planMerge(
   existing: unknown,
   key: string,
   entry: ServerEntry,
+  container = "mcpServers",
 ): MergePlan {
   const hadValidRoot = isPlainObject(existing);
   const root: Record<string, unknown> = hadValidRoot ? { ...(existing as Record<string, unknown>) } : {};
 
-  const hadServers = isPlainObject(root.mcpServers);
+  const hadServers = isPlainObject(root[container]);
   const servers: Record<string, unknown> = hadServers
-    ? { ...(root.mcpServers as Record<string, unknown>) }
+    ? { ...(root[container] as Record<string, unknown>) }
     : {};
 
   const current = servers[key];
@@ -82,6 +86,6 @@ export function planMerge(
         : "configured";
 
   servers[key] = entry as unknown as Record<string, unknown>;
-  root.mcpServers = servers;
+  root[container] = servers;
   return { config: root, status, changed: true };
 }

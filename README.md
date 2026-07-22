@@ -92,7 +92,8 @@ No install step: `npx` fetches and runs it on demand.
 ### Option A — `npx jamgate setup` (recommended)
 
 One command detects the MCP clients installed on your machine (Claude Code, Claude Desktop,
-Cursor, Windsurf) and wires Jamgate into each:
+Cursor, Windsurf, Gemini CLI, VS Code / Copilot, Cline, Roo Code, OpenCode, Zed) and wires
+Jamgate into each:
 
 ```bash
 npx jamgate setup
@@ -152,6 +153,78 @@ prompt). Or add to `claude_desktop_config.json` (Settings → Developer → Edit
 ```
 
 **Windsurf** — add the same `mcpServers` block to `~/.codeium/windsurf/mcp_config.json`.
+
+**Gemini CLI** — add the same `mcpServers` block to `~/.gemini/settings.json`.
+
+**Cline / Roo Code** — add the same `mcpServers` block to the extension's MCP settings file
+(Cline: `.../globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`; Roo:
+`.../globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`), or use each
+extension's "Configure/Edit MCP Servers" button.
+
+**VS Code (Copilot)** — add to the user `mcp.json` (Command Palette → **MCP: Open User
+Configuration**). VS Code uses a `servers` key and an explicit `type`:
+
+```json
+{
+  "servers": {
+    "jamgate": { "type": "stdio", "command": "npx", "args": ["jamgate"] }
+  }
+}
+```
+
+**OpenCode** — add to `~/.config/opencode/opencode.json` under the `mcp` key (note the single
+`command` array and `enabled` flag):
+
+```json
+{
+  "mcp": {
+    "jamgate": { "type": "local", "command": ["npx", "jamgate"], "enabled": true }
+  }
+}
+```
+
+**Zed** — add to `settings.json` under `context_servers`:
+
+```json
+{
+  "context_servers": {
+    "jamgate": { "command": "npx", "args": ["jamgate"] }
+  }
+}
+```
+
+#### Supported agents
+
+`jamgate setup` auto-wires every agent below whose MCP config it can merge **losslessly** —
+each entry shape is verified against the vendor's official docs. Agents whose config lives in a
+non-JSON format we can't safely round-trip (TOML / YAML) are listed as **manual** with the
+one-liner to add yourself.
+
+| Agent | Config file | `setup` | Remote (`--remote`) |
+| --- | --- | --- | --- |
+| Claude Code | `~/.claude.json` | ✅ auto | ✅ |
+| Claude Desktop | `claude_desktop_config.json` | ✅ auto | connectors UI |
+| Cursor | `~/.cursor/mcp.json` | ✅ auto | ✅ |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | ✅ auto | ✅ |
+| Gemini CLI | `~/.gemini/settings.json` | ✅ auto | ✅ |
+| VS Code (Copilot) | `<Code>/User/mcp.json` | ✅ auto | ✅ |
+| Cline | `.../saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | ✅ auto | ✅ |
+| Roo Code | `.../rooveterinaryinc.roo-cline/settings/mcp_settings.json` | ✅ auto | ✅ |
+| OpenCode | `~/.config/opencode/opencode.json` | ✅ auto | ✅ |
+| Zed | `~/.config/zed/settings.json` | ✅ auto | ✅ |
+| Codex CLI | `~/.codex/config.toml` (TOML) | manual¹ | — |
+| Goose | `~/.config/goose/config.yaml` (YAML) | manual¹ | — |
+| Continue | `~/.continue/config.yaml` (YAML) | manual¹ | — |
+
+¹ **Manual** — these use TOML/YAML; rather than risk mangling comments/formatting we don't
+auto-edit them. Add Jamgate by hand: **Codex CLI** →
+`[mcp_servers.jamgate]` with `command = "npx"` and `args = ["jamgate"]` in `~/.codex/config.toml`;
+**Goose** → a `stdio` extension under `extensions:` with `cmd: npx` / `args: ["jamgate"]`;
+**Continue** → an `mcpServers:` list entry with `command: npx` / `args: [jamgate]`.
+
+> For agents that live in a shared, comment-friendly settings file (Gemini, OpenCode, Zed),
+> `setup` will **skip** rather than overwrite a file it can't parse as strict JSON — so a
+> `//`-commented `settings.json` is never clobbered; add the block by hand in that case.
 
 Restart the agent. It now has three tools:
 
@@ -374,14 +447,15 @@ Once the deploy is live you have two things: a **URL** ending in `/mcp` and a **
 platform's environment/variables tab). Connect each device to the same instance so they share one
 memory:
 
-- **Desktops (Claude Code, Cursor, Windsurf) — one command:**
+- **Desktops (Claude Code, Cursor, Windsurf, Gemini CLI, VS Code, Cline, Roo Code, OpenCode,
+  Zed) — one command:**
 
   ```bash
   npx jamgate setup --remote https://your-instance/mcp --token <your-token>
   ```
 
   This wires every detected client on that machine to your instance (Streamable HTTP clients
-  only; others are skipped with a reason).
+  only; others — e.g. Claude Desktop — are skipped with a reason).
 
 - **Phone (Claude app) and claude.ai in a browser:** Settings → **Connectors** → *Add custom
   connector* → URL `https://your-instance/mcp`, and provide the bearer token when asked. The same
@@ -619,8 +693,9 @@ for the full scope):
   auth, so one instance can serve all of your agents (phone, browser, laptop) from one
   shared memory. stdio stays the default.
 - **One-click install** — `npx jamgate setup` wires every detected client (Claude Code,
-  Claude Desktop, Cursor, Windsurf) in one idempotent, backup-first command, plus a Cursor
-  deeplink and a Claude Desktop `.mcpb` bundle.
+  Claude Desktop, Cursor, Windsurf, Gemini CLI, VS Code / Copilot, Cline, Roo Code, OpenCode,
+  Zed) in one idempotent, backup-first command, plus a Cursor deeplink and a Claude Desktop
+  `.mcpb` bundle.
 - **Deploy your own** *(no terminal)* — a `Dockerfile`, a Render blueprint, and a Railway
   config so a non-technical user can click a button, log into a platform, and get their own
   hosted instance with a generated token and a persistent disk. We host nothing.

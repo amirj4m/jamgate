@@ -81,6 +81,13 @@ export interface SetupOptions {
   only?: ClientId[];
 }
 
+/** Does a wired entry describe a remote (HTTP) transport? Remote entries carry a URL field —
+ *  `url`, or a client-specific alias (`httpUrl` for Gemini, `serverUrl` for Windsurf) — whereas
+ *  stdio entries carry `command`. Used only for status reporting. */
+function isRemoteEntry(entry: Record<string, unknown>): boolean {
+  return "url" in entry || "httpUrl" in entry || "serverUrl" in entry;
+}
+
 async function pathExists(p: string): Promise<boolean> {
   try {
     await fs.access(p);
@@ -180,7 +187,21 @@ async function configureClient(
 
   // Decide the outcome from the current file state first (uniform across CLI and merge paths).
   const { existing, malformed, fileExists } = await readConfig(path);
-  const plan = planMerge(existing, client.serverKey, entry);
+
+  // Safety guard for SHARED config files (Gemini/Zed/OpenCode): if the file exists but doesn't
+  // parse as strict JSON (almost always `//` comments), we must NOT rewrite it — doing so would
+  // clobber the user's entire settings down to just our entry. Skip with a clear pointer instead.
+  // Dedicated MCP-only files (Cursor, Cline, …) keep the tolerant "rewrite malformed" behaviour,
+  // since there the backup already covers the only thing at risk.
+  if (client.sharedConfig && malformed && fileExists) {
+    return {
+      ...base,
+      outcome: "skipped",
+      detail: `existing config isn't plain JSON (comments?) — add jamgate to ${client.containerKey} manually to keep it intact`,
+    };
+  }
+
+  const plan = planMerge(existing, client.serverKey, entry, client.containerKey);
 
   if (plan.status === "already-configured") {
     return { ...base, outcome: "already-configured" };
@@ -298,7 +319,7 @@ export async function runStatus(opts: {
       const { existing } = await readConfig(path);
       const servers =
         existing && typeof existing === "object" && existing !== null
-          ? (existing as Record<string, unknown>).mcpServers
+          ? (existing as Record<string, unknown>)[client.containerKey]
           : undefined;
       const entry =
         servers && typeof servers === "object" && servers !== null
@@ -306,7 +327,7 @@ export async function runStatus(opts: {
           : undefined;
       if (entry && typeof entry === "object") {
         wired = true;
-        transport = "url" in (entry as Record<string, unknown>) ? "http" : "stdio";
+        transport = isRemoteEntry(entry as Record<string, unknown>) ? "http" : "stdio";
       }
     }
     clients.push({ id: client.id, label: client.label, path, detected, wired, transport });

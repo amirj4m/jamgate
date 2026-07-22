@@ -180,12 +180,16 @@ describe("OAuthStore: PKCE + code lifecycle", () => {
   });
 
   it("expires a code after its TTL", async () => {
-    const { oauth, cleanup } = await tempOAuthStore({ authCodeTtlMs: 15 });
+    // Deterministic clock: freeze time, mint the code, then jump past the TTL. Using an injected
+    // clock instead of a real setTimeout keeps this from racing file I/O on a slow/busy CI box
+    // (a 15ms TTL vs. a real fsync is a coin-flip — see the flaky oauth.test.ts:196 fix).
+    let clock = 1_000_000;
+    const { oauth, cleanup } = await tempOAuthStore({ authCodeTtlMs: 15, now: () => clock });
     try {
       const client = await oauth.registerClient({ redirect_uris: [CALLBACK] });
       const { verifier, challenge } = pkce();
       const code = await oauth.createAuthCode({ client_id: client.client_id, redirect_uri: CALLBACK, code_challenge: challenge, code_challenge_method: "S256" });
-      await new Promise((r) => setTimeout(r, 40));
+      clock += 40; // advance well past the 15ms code TTL
       const expired = await oauth.redeemAuthCode({ code, client_id: client.client_id, redirect_uri: CALLBACK, code_verifier: verifier });
       assert.equal(expired, null, "an expired code yields no token");
     } finally {
@@ -194,7 +198,11 @@ describe("OAuthStore: PKCE + code lifecycle", () => {
   });
 
   it("verifies issued access tokens and rejects expired/unknown ones", async () => {
-    const { oauth, cleanup } = await tempOAuthStore({ accessTokenTtlMs: 20 });
+    // Deterministic clock (see the sibling test above): the previous version issued a token with a
+    // 20ms TTL and then asserted it was still valid — which only held if issuing + the first verify
+    // finished within 20ms. Under load the fsync could blow that budget and fail spuriously.
+    let clock = 1_000_000;
+    const { oauth, cleanup } = await tempOAuthStore({ accessTokenTtlMs: 20, now: () => clock });
     try {
       const client = await oauth.registerClient({ redirect_uris: [CALLBACK] });
       const { verifier, challenge } = pkce();
@@ -203,7 +211,7 @@ describe("OAuthStore: PKCE + code lifecycle", () => {
       assert.ok(issued);
       assert.ok(await oauth.verifyAccessToken(issued!.access_token));
       assert.equal(await oauth.verifyAccessToken("garbage"), null);
-      await new Promise((r) => setTimeout(r, 40));
+      clock += 40; // advance well past the 20ms access-token TTL
       assert.equal(await oauth.verifyAccessToken(issued!.access_token), null, "expired token no longer verifies");
     } finally {
       await cleanup();

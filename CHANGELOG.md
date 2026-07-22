@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-22
+
+`jamgate setup` grows from four wired agents to ten, and gains remote (Streamable HTTP) for
+every client whose docs support it. The guiding rule (DECISIONS D-046): an agent ships only if
+its exact config shape is **verified against the vendor's official docs** and we can merge into
+its config file **losslessly** — no parser dependency, nothing already there destroyed.
+
+**Minor bump: new capability, no breaking changes.** Existing wirings are untouched, and a
+re-run is still idempotent and backup-first.
+
 ### Added
+
+- **Six new auto-wired agents for `jamgate setup`** (D-046): **Gemini CLI**, **VS Code
+  (Copilot)**, **Cline**, **Roo Code**, **OpenCode**, and **Zed**. Each entry shape is verified
+  against the vendor's own docs and pinned by tests, because none of them agree — the container
+  key varies (`mcpServers` / `servers` / `context_servers` / `mcp`), the remote transport tag
+  varies even between the Cline/Roo fork (`streamableHttp` vs `streamable-http`), and the remote
+  URL field varies (`url` / `httpUrl` / `serverUrl`). `jamgate status` now covers all ten.
+- **Remote (`--remote`) support for the new agents and Windsurf.** Windsurf's docs now cover
+  Streamable HTTP (via a `serverUrl` field), so `--remote` wires it too; Gemini/VS Code/Cline/
+  Roo/OpenCode/Zed each get their documented HTTP entry with a bearer `Authorization` header.
+- **A safety guard for shared config files.** Gemini, OpenCode and Zed keep MCP servers inside
+  a shared, often `//`-commented settings file. Rather than let the old "malformed → start
+  fresh" path rewrite such a file down to just our entry, `setup` now **skips** any shared
+  config it can't parse as strict JSON and tells you to add the block by hand.
+- **A supported-agents table in the README**, listing what auto-wires vs. what is **manual** —
+  **Codex CLI** (TOML), **Goose** and **Continue** (YAML) are intentionally not auto-edited
+  (a lossless merge would need a parser dependency), each with a one-line manual snippet.
+
+### Fixed
+
+- **Two OAuth TTL tests are now deterministic** (`oauth.test.ts`). They issued a token/code with
+  a 15–20 ms TTL and then slept a real 40 ms, which raced the store's `fsync` on a loaded CI box
+  and failed intermittently on tag publishes. They now drive the `OAuthStore`'s injectable clock
+  instead of the wall clock — freeze, act, jump past the TTL — so expiry is exact.
+
+### Added (from 0.8.x development)
 
 - **`memory-discipline` agent skill** at `skills/memory-discipline/SKILL.md`. A portable
   [agentskills.io](https://agentskills.io) instruction pack that teaches an agent *how* to

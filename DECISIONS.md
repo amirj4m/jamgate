@@ -871,3 +871,42 @@ agent cannot see — that is what §2's stateful checks are for. But the agent h
 conversation, which the gate cannot see, and "is this the same counter?" is a question only
 the conversation answers. Handing it back is not the gate giving up; it is the gate routing
 the question to whoever can actually answer it (RULES §5.4).
+
+### D-046 — `jamgate setup` supports the agent only if we can wire it losslessly
+
+The setup wizard shipped wiring four clients (Claude Code, Claude Desktop, Cursor, Windsurf).
+The obvious next move is "support every popular MCP agent." The constraint we held to instead:
+**an agent ships only if (a) its exact config shape is verified against the vendor's own docs,
+and (b) we can merge into its config file without a parser dependency and without destroying
+what's already there.** Nothing unverified, nothing lossy.
+
+Ten agents were researched against official sources. Six new ones cleared both bars and ship:
+**Gemini CLI, VS Code (Copilot), Cline, Roo Code, OpenCode, Zed** — plus **Windsurf** gained
+remote (its docs now cover Streamable HTTP via a `serverUrl` field). Every field name is
+load-bearing and none of them agree:
+
+- container key differs — `mcpServers` (most), `servers` (VS Code), `context_servers` (Zed),
+  `mcp` (OpenCode);
+- the remote transport tag differs even between siblings — Cline's `streamableHttp` (camelCase)
+  vs Roo's `streamable-http` (hyphen), both forked from the same codebase;
+- the remote URL field differs — `url` (most), `httpUrl` (Gemini; plain `url` is SSE there),
+  `serverUrl` (Windsurf);
+- OpenCode collapses `command`+`args` into one array and tags every entry `enabled`.
+
+So each client carries an explicit `shape` and `containerKey`, and `buildEntry` emits the
+documented form per shape. A wrong field is a silently-broken config, which is why these are
+pinned by tests, not just written once.
+
+Three agents were **rejected on bar (b)**: **Codex CLI** (TOML), **Goose** and **Continue**
+(YAML). A lossless merge into a hand-commented TOML/YAML file needs a real parser — a new
+runtime dependency and a new class of "we reformatted your file" bug. Not worth it for the
+setup convenience; the README gives each a one-line manual snippet instead. We ship the
+merge we can guarantee and point to the door for the rest.
+
+One safety addition falls out of this. Three of the six (Gemini, OpenCode, Zed) keep MCP
+servers inside a **shared** settings file — the user's whole editor/CLI config, often
+`//`-commented. Our JSON reader can't parse comments, and the old "malformed → start fresh"
+path would have rewritten that file down to just our entry. For `sharedConfig` clients the
+runner now **refuses** to overwrite a file it can't parse as strict JSON, and skips with a
+"configure manually" reason. A dedicated MCP-only file (Cursor, Cline, …) keeps the tolerant
+behaviour, because there the backup already covers the only thing at risk.

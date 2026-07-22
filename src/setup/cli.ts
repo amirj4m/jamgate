@@ -18,7 +18,18 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-const VALID_CLIENTS: readonly ClientId[] = ["claude-code", "claude-desktop", "cursor", "windsurf"];
+const VALID_CLIENTS: readonly ClientId[] = [
+  "claude-code",
+  "claude-desktop",
+  "cursor",
+  "windsurf",
+  "gemini-cli",
+  "vscode",
+  "cline",
+  "roo",
+  "opencode",
+  "zed",
+];
 
 export interface ParsedSetupArgs {
   mode: Mode;
