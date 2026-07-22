@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-22
+
+### Fixed
+
+- **The server advertised the wrong version.** `src/version.ts` — the single source of truth
+  for the MCP handshake and `/healthz` — is bumped by hand each release, and the 0.9.0 cut
+  forgot it, so 0.9.0 reported itself as `0.8.0`. This patch corrects it and adds a test
+  (`version.test.ts`) that fails the build whenever `src/version.ts` and `package.json` drift,
+  so a forgotten bump can never ship again. No behaviour change beyond the reported version.
+
 ## [0.9.0] - 2026-07-22
 
 `jamgate setup` grows from four wired agents to ten, and gains remote (Streamable HTTP) for
