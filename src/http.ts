@@ -11,6 +11,7 @@ import type { MemoryStore } from "./store/types.js";
 import { VERSION } from "./version.js";
 import { createServer } from "./index.js";
 import { resolveGateLogConfig, type GateLogConfig } from "./gate/log.js";
+import { saveThroughGate } from "./gate/pipeline.js";
 import type { OAuthStore } from "./oauth/store.js";
 import { handleOAuth, resourceMetadataUrl } from "./oauth/handlers.js";
 
@@ -35,6 +36,9 @@ const DEFAULT_PORT = 8420;
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_MCP_PATH = "/mcp";
 const HEALTH_PATH = "/healthz";
+/** The plain-HTTP REST API prefix (D-049). A collection endpoint (`/v1/memory`) plus an item
+ *  endpoint (`/v1/memory/:id`), served behind the same bearer gate as the MCP transport. */
+const REST_PREFIX = "/v1/memory";
 
 /** How to run: stdio (default) or the opt-in HTTP transport. Parsed from argv + env so the
  *  bootstrap in index.ts stays a thin switch and the parsing is unit-testable. */
@@ -268,6 +272,11 @@ async function handleRequest(
     return;
   }
 
+  // 2.5 REST API (D-049). Plain-HTTP CRUD over the same store, behind the same bearer gate as
+  //     MCP. Handled here — after auth, before the MCP-only path check — so a non-MCP client
+  //     (a mobile app backend, a script) can save/recall/forget without speaking JSON-RPC.
+  if (await handleRest(req, res, ctx)) return;
+
   // 3. Past the auth gate, only the MCP endpoint exists (the unauthenticated `/healthz` and the
   //    OAuth endpoints were already handled above). Everything else is 404.
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -362,6 +371,123 @@ async function handleRequest(
     error: { code: -32000, message: `Method ${req.method} not allowed` },
     id: null,
   });
+}
+
+/**
+ * The plain-HTTP REST API (D-049). Returns `true` when it owned the request (path under
+ * `/v1/memory`), `false` to let the caller fall through to the MCP path check. Auth has
+ * already passed by the time this runs, so every handler here is authenticated.
+ *
+ * Routes:
+ *  - `POST   /v1/memory`      {text|content|memory, scope?, type?, subject?, source?} → save
+ *  - `GET    /v1/memory`      ?query=&scope=&limit=                                    → recall
+ *  - `DELETE /v1/memory/:id`  ?scope=                                                  → forget
+ *
+ * Saves go through the exact same gate as the MCP tool (shared {@link saveThroughGate}), so a
+ * REST client gets identical dedup/supersession/conflict/secret behaviour, per scope (D-048).
+ * Errors are JSON with a stable `error` code; nothing here is JSON-RPC (that is the MCP path).
+ */
+async function handleRest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RequestContext,
+): Promise<boolean> {
+  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const path = url.pathname;
+  const isCollection = path === REST_PREFIX;
+  const isItem = path.startsWith(`${REST_PREFIX}/`);
+  if (!isCollection && !isItem) return false;
+
+  // POST /v1/memory — save through the gate.
+  if (isCollection && req.method === "POST") {
+    const body = await readJsonBody(req);
+    if (body === PARSE_ERROR) {
+      sendJson(res, 400, { error: "parse_error", message: "request body is not valid JSON" });
+      return true;
+    }
+    const b = (body ?? {}) as Record<string, unknown>;
+    const usable = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+    // Accept the same field aliases the MCP tool does (D-039): text is canonical, then
+    // content, then memory. Keeps a REST client that mirrors the tool shape working.
+    const text = usable(b.text) ? b.text : usable(b.content) ? b.content : usable(b.memory) ? b.memory : undefined;
+    if (text === undefined) {
+      sendJson(res, 400, {
+        error: "invalid_request",
+        message: '"text" is required and must be a non-empty string (aliases: "content", "memory")',
+      });
+      return true;
+    }
+    const outcome = await saveThroughGate(
+      ctx.store,
+      {
+        text,
+        type: usable(b.type) ? b.type : undefined,
+        subject: usable(b.subject) ? b.subject : undefined,
+        source: usable(b.source) ? b.source : undefined,
+        scope: usable(b.scope) ? b.scope : undefined,
+        // No handshake over REST, so no server-observed client provenance (D-024).
+      },
+      ctx.gateLog,
+    );
+    if (!outcome.ok) {
+      // The prefilter turned it away (junk/secret/…). The request was well-formed, so 200 with
+      // the decision — not a 4xx — mirroring how the gate reports a non-store outcome.
+      sendJson(res, 200, { action: "rejected", reason: outcome.reason });
+      return true;
+    }
+    const r = outcome.result;
+    // 201 when a record actually landed (created or a recency supersede); 200 for the outcomes
+    // that understood the request but deliberately stored nothing (duplicate/conflict/near-dup).
+    const status = r.action === "created" || r.action === "superseded" ? 201 : 200;
+    sendJson(res, status, {
+      action: r.action,
+      memory: r.memory,
+      ...(r.retired ? { retired: r.retired } : {}),
+      ...(r.conflictsWith ? { conflictsWith: r.conflictsWith } : {}),
+      ...(r.possibleDuplicates ? { possibleDuplicates: r.possibleDuplicates } : {}),
+      ...(r.relatedMemories ? { relatedMemories: r.relatedMemories } : {}),
+    });
+    return true;
+  }
+
+  // GET /v1/memory?query=&scope=&limit= — recall within a scope.
+  if (isCollection && req.method === "GET") {
+    const query = url.searchParams.get("query") ?? "";
+    const scope = url.searchParams.get("scope") ?? undefined;
+    const limitRaw = url.searchParams.get("limit");
+    const parsed = limitRaw === null ? NaN : Number(limitRaw);
+    const limit = Number.isInteger(parsed) && parsed > 0 ? parsed : 5;
+    const memories = await ctx.store.recall(query, limit, false, scope);
+    sendJson(res, 200, { memories });
+    return true;
+  }
+
+  // DELETE /v1/memory/:id?scope= — forget within a scope.
+  if (isItem && req.method === "DELETE") {
+    const id = decodeURIComponent(path.slice(`${REST_PREFIX}/`.length));
+    const scope = url.searchParams.get("scope") ?? undefined;
+    if (id.trim() === "") {
+      sendJson(res, 400, { error: "invalid_request", message: "a memory id is required in the path" });
+      return true;
+    }
+    const result = await ctx.store.forget(id, scope);
+    if (result.ok) {
+      sendJson(res, 200, { ok: true, id: result.id });
+    } else if (result.reason === "ambiguous") {
+      sendJson(res, 409, { ok: false, error: "ambiguous", matches: result.matches });
+    } else {
+      sendJson(res, 404, { ok: false, error: "not_found" });
+    }
+    return true;
+  }
+
+  // Path is ours but the method/shape is not supported.
+  res.setHeader("Allow", isCollection ? "GET, POST" : "DELETE");
+  sendJson(res, 405, {
+    error: "method_not_allowed",
+    message: `Method ${req.method} not allowed on ${path}`,
+  });
+  return true;
 }
 
 /**
