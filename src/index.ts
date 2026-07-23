@@ -15,14 +15,8 @@ import { OAuthStore } from "./oauth/store.js";
 import { setupCommand, statusCommand } from "./setup/cli.js";
 import { exportCommand, importCommand } from "./backup/cli.js";
 import type { ClientInfo, MemoryStore } from "./store/types.js";
-import { prefilter } from "./gate/prefilter.js";
-import { deriveSubject } from "./gate/subject.js";
-import {
-  appendGateLog,
-  resolveGateLogConfig,
-  type GateDecision,
-  type GateLogConfig,
-} from "./gate/log.js";
+import { resolveGateLogConfig, type GateLogConfig } from "./gate/log.js";
+import { saveThroughGate } from "./gate/pipeline.js";
 
 /**
  * Build the Jamgate MCP server around a given store. Factored out of the stdio bootstrap
@@ -90,6 +84,14 @@ export function createServer(
               enum: ["agent-inferred", "user-confirmed", "user-explicit"],
               description: "Where this memory came from. Defaults to agent-inferred.",
             },
+            scope: {
+              type: "string",
+              description:
+                "Optional namespace to save into, e.g. 'amir/greek'. Memories in different " +
+                "scopes never interfere — the gate (dedup, supersession, conflict) applies " +
+                "per scope, and recall/forget are per scope. Omit for the single default " +
+                "namespace, which is the normal single-user behaviour.",
+            },
           },
           required: ["text"],
         },
@@ -102,6 +104,12 @@ export function createServer(
           properties: {
             query: { type: "string", description: "What to recall. Empty returns the most recent." },
             limit: { type: "number", description: "Max results (default 5)." },
+            scope: {
+              type: "string",
+              description:
+                "Optional namespace to recall from, e.g. 'amir/greek'. Only memories saved " +
+                "into this scope are returned. Omit for the default namespace.",
+            },
           },
         },
       },
@@ -118,6 +126,14 @@ export function createServer(
               description:
                 "The memory id to forget, exactly as recall_memory printed it (or an " +
                 "unambiguous first-8-characters-or-more prefix of it).",
+            },
+            scope: {
+              type: "string",
+              description:
+                "Optional namespace the memory lives in, e.g. 'amir/greek'. Forget only " +
+                "resolves ids within this scope, so one namespace can't delete another's " +
+                "memory. Omit for the default namespace. Use the same scope you recalled " +
+                "the id from.",
             },
           },
           required: ["id"],
@@ -180,51 +196,26 @@ export function createServer(
       }
       const text = rawText;
       const client = clientInfoFromHandshake();
-      const verdict = prefilter(text, { type: args.type ? String(args.type) : undefined });
-      if (!verdict.ok) {
-        // Record the rejection too — the classifier learns from what the gate turns away.
-        // Except the text itself when the rejection WAS about the text being a secret: the
-        // gate log is a plaintext file that outlives the save, and refusing to store a
-        // credential while logging it verbatim would be theatre (D-042). The decision and
-        // the reason are still logged, which is what the classifier actually learns from.
-        await appendGateLog(
-          {
-            decision: "rejected",
-            reason: verdict.reason,
-            type: args.type ? String(args.type) : undefined,
-            subject: args.subject ? String(args.subject) : undefined,
-            source: args.source ? String(args.source) : undefined,
-            client: client?.name,
-            text: verdict.redact ? `[redacted: ${text.length} characters]` : text,
-          },
-          gateLog,
-        );
-        return { content: [{ type: "text", text: `Rejected by gate: ${verdict.reason}.` }] };
-      }
-      // Use the agent's subject when given; otherwise try to derive one conservatively
-      // (D-027). A derived subject only fires on a confident rule match, else stays unset.
-      const subject = args.subject ? String(args.subject) : deriveSubject(text);
-      const result = await store.save({
-        text,
-        type: args.type as never,
-        source: (args.source as never) ?? "agent-inferred",
-        subject,
-        // Provenance from the MCP initialize handshake, not the agent's tool arguments (D-024).
-        client,
-      });
-      // Log the gate's decision to the local-only training buffer (D-025).
-      const decision: GateDecision = result.action === "created" ? "saved" : result.action;
-      await appendGateLog(
+      // Run the exact same gate the REST API runs (D-049): prefilter → subject → store.save
+      // → gate log, scoped per D-048. The handler keeps only its own concerns — argument
+      // shape above, and the human-readable reply below.
+      const outcome = await saveThroughGate(
+        store,
         {
-          decision,
-          type: result.memory.type,
-          subject: result.memory.subject,
-          source: result.memory.source,
-          client: result.memory.client?.name,
-          text: result.memory.text,
+          text,
+          type: args.type ? String(args.type) : undefined,
+          subject: args.subject ? String(args.subject) : undefined,
+          source: args.source ? String(args.source) : undefined,
+          scope: args.scope ? String(args.scope) : undefined,
+          // Provenance from the MCP initialize handshake, not the agent's tool arguments (D-024).
+          client,
         },
         gateLog,
       );
+      if (!outcome.ok) {
+        return { content: [{ type: "text", text: `Rejected by gate: ${outcome.reason}.` }] };
+      }
+      const result = outcome.result;
       let msg: string;
       if (result.action === "duplicate") {
         msg = `Already known (no duplicate added): "${result.memory.text}" [id ${result.memory.id}]`;
@@ -289,7 +280,12 @@ export function createServer(
     }
 
     if (name === "recall_memory") {
-      const hits = await store.recall(String(args.query ?? ""), Number(args.limit ?? 5));
+      const hits = await store.recall(
+        String(args.query ?? ""),
+        Number(args.limit ?? 5),
+        false,
+        args.scope ? String(args.scope) : undefined,
+      );
       if (hits.length === 0) return { content: [{ type: "text", text: "No matching memories." }] };
       // The id goes on its own line, last, with nothing punctuating it (D-041). Inline
       // `(id …, <date>)` put a comma against the id and buried it after a memory that can
@@ -308,7 +304,7 @@ export function createServer(
 
     if (name === "forget_memory") {
       const given = String(args.id ?? "");
-      const res = await store.forget(given);
+      const res = await store.forget(given, args.scope ? String(args.scope) : undefined);
       if (res.ok) return { content: [{ type: "text", text: `Forgotten (id ${res.id}).` }] };
       const msg =
         res.reason === "ambiguous"

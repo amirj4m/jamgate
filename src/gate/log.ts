@@ -16,6 +16,7 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { DEFAULT_SCOPE } from "../store/scope.js";
 
 export type GateDecision =
   | "saved"
@@ -32,6 +33,9 @@ export interface GateLogEntry {
   type?: string;
   subject?: string;
   source?: string;
+  /** The namespace this decision happened in (D-048). Logged only for a non-default scope,
+   *  so single-tenant logs keep their exact pre-namespace shape. */
+  scope?: string;
   /** The MCP client name from the handshake (D-024), if known. */
   client?: string;
   /** The memory text (truncated). This is the classifier's main training signal. */
@@ -99,6 +103,9 @@ export async function appendGateLog(
       ...(entry.type ? { type: entry.type } : {}),
       ...(entry.subject ? { subject: entry.subject } : {}),
       ...(entry.source ? { source: entry.source } : {}),
+      // Only record a non-default scope, so a single-tenant log line is byte-for-byte what
+      // it was before namespaces (D-048).
+      ...(entry.scope && entry.scope !== DEFAULT_SCOPE ? { scope: entry.scope } : {}),
       ...(entry.client ? { client: entry.client } : {}),
       text: truncate(entry.text, config.maxTextChars),
     };

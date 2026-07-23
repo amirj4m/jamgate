@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { FileStore } from "../src/store/fileStore.js";
+import { CURRENT_SCHEMA_VERSION } from "../src/store/schema.js";
 import { tempStore } from "./helpers.js";
 
 describe("FileStore persistence", () => {
@@ -13,7 +14,7 @@ describe("FileStore persistence", () => {
     try {
       await new FileStore(path).save({ text: "jam uses Linux", source: "user-explicit" });
       const raw = JSON.parse(await fs.readFile(path, "utf8"));
-      assert.equal(raw.schemaVersion, 2);
+      assert.equal(raw.schemaVersion, CURRENT_SCHEMA_VERSION);
       assert.equal(raw.memories.length, 1);
       assert.equal(raw.memories[0].text, "jam uses Linux");
     } finally {

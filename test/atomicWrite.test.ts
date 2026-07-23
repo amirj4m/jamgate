@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import { dirname } from "node:path";
 import { describe, it } from "node:test";
 import { FileStore } from "../src/store/fileStore.js";
+import { CURRENT_SCHEMA_VERSION } from "../src/store/schema.js";
 import { tempStore } from "./helpers.js";
 
 /** A store whose disk write dies halfway through, before the fsync + rename that would
@@ -31,7 +32,7 @@ describe("atomic write (Phase 2, item 1)", () => {
 
       // The target file is still valid JSON and still holds exactly the committed data.
       const parsed = JSON.parse(await fs.readFile(path, "utf8"));
-      assert.equal(parsed.schemaVersion, 2);
+      assert.equal(parsed.schemaVersion, CURRENT_SCHEMA_VERSION);
       assert.equal(parsed.memories.length, 1);
       assert.equal(parsed.memories[0].text, "jam lives in Berlin");
 

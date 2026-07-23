@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { FileStore } from "../src/store/fileStore.js";
 import type { Memory } from "../src/store/types.js";
+import { CURRENT_SCHEMA_VERSION } from "../src/store/schema.js";
 import {
   exportCommand,
   importCommand,
@@ -97,7 +98,7 @@ describe("jamgate export", () => {
       assert.equal(code, 0);
 
       const env = JSON.parse(out.get()) as ExportEnvelope;
-      assert.equal(env.schemaVersion, 2);
+      assert.equal(env.schemaVersion, CURRENT_SCHEMA_VERSION);
       assert.match(env.generator, /^jamgate\//);
       assert.equal(new Date(env.exportedAt).toISOString(), env.exportedAt);
       assert.equal(env.memories.length, 3, "active + superseded are both exported");

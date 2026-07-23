@@ -24,6 +24,12 @@ export interface Memory {
    *  time-aware supersession: a newer memory with the same subject retires the older
    *  one (RULES §2.3, D-015). Optional — the calling agent supplies it (RULES §5.2). */
   subject?: string;
+  /** The namespace this memory belongs to (D-048). Optional on disk for backward
+   *  compatibility: records written before namespaces carry none and read as the default
+   *  scope. The gate (dedup/supersession/conflict/near-duplicate), recall and forget all
+   *  operate strictly WITHIN one scope, so two namespaces never interfere. Normalized to a
+   *  canonical form (trimmed/lowercased) by the store; absent/empty means the default scope. */
+  scope?: string;
   source: MemorySource;
   status: MemoryStatus;
   createdAt: string; // ISO timestamp — every memory is a timestamped event (RULES §2.5, §4)
@@ -51,6 +57,9 @@ export interface SaveInput {
   type?: MemoryType;
   source: MemorySource;
   subject?: string;
+  /** The namespace to save into (D-048). Absent/empty → the default scope, which is the
+   *  exact single-tenant behaviour that predates namespaces. Normalized by the store. */
+  scope?: string;
   /** The MCP client behind this save, stamped by the server from the handshake (D-024). */
   client?: ClientInfo;
 }
@@ -104,7 +113,16 @@ export type ForgetResult =
  */
 export interface MemoryStore {
   save(input: SaveInput): Promise<SaveResult>;
-  recall(query: string, limit?: number, includeSuperseded?: boolean): Promise<Memory[]>;
-  /** Accepts a full id or an unambiguous id prefix of at least 8 characters (D-041). */
-  forget(idOrPrefix: string): Promise<ForgetResult>;
+  /** Recall within a scope (D-048). `scope` absent/empty → the default scope, so the
+   *  three-argument call every existing caller makes keeps its single-tenant behaviour. */
+  recall(
+    query: string,
+    limit?: number,
+    includeSuperseded?: boolean,
+    scope?: string,
+  ): Promise<Memory[]>;
+  /** Accepts a full id or an unambiguous id prefix of at least 8 characters (D-041).
+   *  Operates WITHIN `scope` (D-048): an id in another scope is not found here, so one
+   *  namespace can never delete another's memory. Absent/empty → the default scope. */
+  forget(idOrPrefix: string, scope?: string): Promise<ForgetResult>;
 }

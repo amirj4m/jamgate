@@ -11,6 +11,7 @@ import type {
   SaveResult,
 } from "./types.js";
 import { CURRENT_SCHEMA_VERSION, migrate, type StoreFile } from "./schema.js";
+import { normalizeScope } from "./scope.js";
 import {
   computeExpiresAt,
   isCompactable,
@@ -46,6 +47,13 @@ function normalizeId(raw: string): string {
     .toLowerCase()
     .replace(/^[^0-9a-f]+/, "")
     .replace(/[^0-9a-f]+$/, "");
+}
+
+/** The canonical scope of a stored memory (D-048). A record written before namespaces has
+ *  no `scope` field and belongs to the default scope — the same fold `normalizeScope` applies
+ *  to an absent input, so an un-migrated record and a default save always compare equal. */
+function memScope(m: Memory): string {
+  return normalizeScope(m.scope);
 }
 
 /** How much we trust a memory by where it came from. A lower-trust source must not
@@ -204,6 +212,9 @@ export class FileStore implements MemoryStore {
       text: input.text.trim(),
       type: input.type,
       subject: input.subject?.trim().toLowerCase() || undefined,
+      // The namespace this memory lives in (D-048). Normalized so an absent/empty scope
+      // becomes the default — reproducing today's single-tenant behaviour exactly.
+      scope: normalizeScope(input.scope),
       source: input.source,
       status: "active",
       createdAt: now,
@@ -245,16 +256,22 @@ export class FileStore implements MemoryStore {
    * keeps its original createdAt.
    */
   private applyGate(candidate: Memory, memories: Memory[], now: string): SaveResult {
+    // Every gate check runs WITHIN one namespace (D-048). Normalize the candidate's scope
+    // once and stamp it back, so an imported record that carried no scope is persisted with
+    // the default rather than a bare undefined; then only same-scope memories are considered.
+    const scope = memScope(candidate);
+    candidate.scope = scope;
+
     const norm = candidate.text.trim().toLowerCase();
     const existing = memories.find(
-      (m) => m.status === "active" && m.text.trim().toLowerCase() === norm,
+      (m) => m.status === "active" && memScope(m) === scope && m.text.trim().toLowerCase() === norm,
     );
     if (existing) return { action: "duplicate", memory: existing };
 
     let retired: Memory[] = [];
     if (candidate.subject) {
       const matches = memories.filter(
-        (m) => m.status === "active" && m.subject === candidate.subject,
+        (m) => m.status === "active" && memScope(m) === scope && m.subject === candidate.subject,
       );
       if (matches.length > 0) {
         const maxTrust = Math.max(...matches.map((m) => TRUST[m.source]));
@@ -287,7 +304,7 @@ export class FileStore implements MemoryStore {
     // mistaken for a duplicate.
     let related: Array<{ memory: Memory; similarity: number }> = [];
     if (retired.length === 0 && candidate.embedding) {
-      const near = this.findSimilar(candidate.embedding, memories, DEFAULT_RELATED_MIN);
+      const near = this.findSimilar(candidate.embedding, memories, DEFAULT_RELATED_MIN, scope);
       const duplicates = near.filter((x) => x.similarity >= this.dupThreshold);
       if (duplicates.length > 0) {
         return {
@@ -358,10 +375,21 @@ export class FileStore implements MemoryStore {
   /** Recall returns ACTIVE, unexpired memories only — retired/superseded and (soft-)
    *  expired states are never surfaced as current facts (D-015: don't confront the user
    *  with stale words). Pass `includeSuperseded` for the full audit history. */
-  async recall(query: string, limit = 5, includeSuperseded = false): Promise<Memory[]> {
+  async recall(
+    query: string,
+    limit = 5,
+    includeSuperseded = false,
+    scope?: string,
+  ): Promise<Memory[]> {
     const now = Date.now();
+    // Recall is strictly scoped (D-048): only memories in the requested namespace are ever
+    // surfaced. An absent/empty scope resolves to the default, so a three-argument call keeps
+    // returning exactly what it did before namespaces existed.
+    const wantScope = normalizeScope(scope);
     const memories = (await this.readAll()).filter(
-      (m) => includeSuperseded || (m.status === "active" && !isExpired(m.expiresAt, now)),
+      (m) =>
+        memScope(m) === wantScope &&
+        (includeSuperseded || (m.status === "active" && !isExpired(m.expiresAt, now))),
     );
     const q = query.trim();
     if (!q) return memories.slice(-limit).reverse();
@@ -398,14 +426,19 @@ export class FileStore implements MemoryStore {
    * that — an unambiguous prefix of at least MIN_ID_PREFIX characters. Two matches is an
    * error, never a coin flip: deleting the wrong memory is unrecoverable.
    */
-  async forget(idOrPrefix: string): Promise<ForgetResult> {
+  async forget(idOrPrefix: string, scope?: string): Promise<ForgetResult> {
     const needle = normalizeId(idOrPrefix);
     if (!needle) return { ok: false, reason: "not-found" };
+    const wantScope = normalizeScope(scope);
     return this.withLock(async () => {
       const memories = await this.readAll();
-      let target = memories.find((m) => m.id.toLowerCase() === needle);
+      // Forget operates WITHIN one namespace (D-048): only same-scope records are candidates,
+      // so an id belonging to another scope is simply "not found" here and can never be
+      // deleted across a namespace boundary. Prefix ambiguity is likewise judged in-scope.
+      const inScope = memories.filter((m) => memScope(m) === wantScope);
+      let target = inScope.find((m) => m.id.toLowerCase() === needle);
       if (!target && needle.length >= MIN_ID_PREFIX) {
-        const matches = memories.filter((m) => m.id.toLowerCase().startsWith(needle));
+        const matches = inScope.filter((m) => m.id.toLowerCase().startsWith(needle));
         if (matches.length > 1) {
           return { ok: false, reason: "ambiguous", matches: matches.map((m) => m.id) };
         }
@@ -438,16 +471,19 @@ export class FileStore implements MemoryStore {
     return memories.filter((m) => !isCompactable(m.expiresAt, nowMs, this.graceMs));
   }
 
-  /** Active memories whose embedding is at/above `floor` similarity to `vec`, most similar
-   *  first. Records without an embedding (older/pre-embedding saves) are simply skipped —
-   *  they can't be compared, and we never guess a near-match (D-026). */
+  /** Active memories in `scope` whose embedding is at/above `floor` similarity to `vec`, most
+   *  similar first. Near-duplicate detection is per-namespace (D-048), so a look-alike in
+   *  another scope never blocks or annotates this save. Records without an embedding
+   *  (older/pre-embedding saves) are simply skipped — they can't be compared, and we never
+   *  guess a near-match (D-026). */
   private findSimilar(
     vec: number[],
     memories: Memory[],
     floor: number,
+    scope: string,
   ): Array<{ memory: Memory; similarity: number }> {
     return memories
-      .filter((m) => m.status === "active" && Array.isArray(m.embedding))
+      .filter((m) => m.status === "active" && memScope(m) === scope && Array.isArray(m.embedding))
       .map((m) => ({ memory: m, similarity: cosineSimilarity(vec, m.embedding as number[]) }))
       .filter((x) => x.similarity >= floor)
       .sort((a, b) => b.similarity - a.similarity);
