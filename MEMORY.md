@@ -3,6 +3,24 @@
 Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
+- **0.10.0 — namespaces + a REST API, so Jamgate can back an app (2026-07-23; D-048, D-049).**
+  Both additive and backward-compatible; the live single-tenant store is untouched. **Scopes
+  (D-048):** an optional `scope` (opaque label, e.g. `amir/greek`) on a memory and on
+  save/recall/forget. The whole gate runs PER scope — dedup, subject supersession, source-trust
+  conflict guard, semantic near-duplicate — and recall/forget are strictly scoped (an id in
+  another scope is "not found", never deletable across a boundary). Absent/empty scope →
+  `"default"`, reproducing today's behaviour exactly; `schemaVersion` 2→3 auto-migration stamps
+  `"default"` on existing records on read (a named scope is preserved), persisted on next write.
+  MCP tools gained an optional `scope` param, added permissively like the `content`/`memory`
+  aliases. **REST API (D-049):** the `--http` server now also serves `POST/GET/DELETE
+  /v1/memory` on the same port, behind the same static-or-OAuth bearer gate; JSON errors, 401
+  unauth, per-scope CRUD. Save on REST and MCP funnel through ONE shared `saveThroughGate`
+  (prefilter→subject→store.save→gate-log), so they can't drift — a test proves a REST credential
+  is refused exactly as the tool refuses it. `src/store/scope.ts` + `src/gate/pipeline.ts` are
+  the new modules; MCP transport and OAuth flow untouched. Tests 390 → **413**; tsc strict +
+  build clean. **NOT deployed to the droplet and NOT published to npm** — both gated on jam's
+  explicit OK (see the deploy plan for a SEPARATE Mathos instance below / in the task report).
+  Pushed to GitHub master.
 - **0.7.4 — the D-037 mystery is solved: the claude.ai/Cowork client sends `content`, not
   `text` (2026-07-21; D-039).** Live evidence, not a guess: that is exactly why the handler saw
   empty text and answered the absurd "too short". `save_memory` now resolves its text from

@@ -280,6 +280,32 @@ that is semantically near-identical to an existing memory comes back as a
 `possible_duplicate` for you to confirm. **If the package isn't installed, Jamgate runs
 on fuzzy recall — nothing breaks.**
 
+## Namespaces (scopes)
+
+By default Jamgate is single-tenant: one human, one memory. If you need **one instance to hold
+several memories that must not blend** — a tutor app with separate subjects, or a small group
+sharing an instance — attach an optional **scope** (an opaque label such as `amir/greek`) to a
+memory and to each operation:
+
+- **The gate is per scope.** Deduplication, subject supersession, the source-trust conflict
+  guard and the semantic near-duplicate check all compare a new memory only against others in
+  the **same** scope. Two scopes can hold the same text, the same subject, even contradictory
+  facts, without one affecting the other.
+- **Recall and forget are strictly scoped.** Recall returns only the requested scope; forget
+  resolves an id only within its scope, so one namespace can never read or delete another's
+  memory — even with the exact id.
+- **Omitting the scope is the normal case.** An absent or empty scope means the single
+  `default` namespace, which is exactly how Jamgate behaved before namespaces existed. Nothing
+  changes for a single-user setup.
+
+Over MCP, pass `scope` on `save_memory` / `recall_memory` / `forget_memory`. Over the REST API
+(below), pass it in the JSON body or as a `?scope=` query parameter. Scopes are just
+case/whitespace-folded labels — `user/role` is a useful convention, not a required format.
+
+> Multi-**user** separation (per-person accounts and auth) is a different thing and is not what
+> a scope provides: whoever holds the `JAMGATE_TOKEN` can address any scope on that instance. A
+> scope is a namespace **within** one token-holder's memory.
+
 ## Configuration
 
 All configuration is via environment variables; every one has a sensible default.
@@ -513,6 +539,38 @@ default) so it can be added to claude.ai and the Claude mobile app — see
   credential, PKCE is enforced, and issued tokens are stored hashed and revocable. Details in
   [Adding to claude.ai](#adding-to-claudeai-mcp-oauth).
 
+### REST API (for app backends)
+
+MCP is the right protocol for agents, but an ordinary app backend just wants plain HTTP. In
+remote mode Jamgate also serves a small REST API on the **same port**, behind the **same bearer
+token** — so a mobile app or a script can save and recall without speaking JSON-RPC:
+
+```bash
+BASE=https://memory.example.com/v1/memory
+AUTH="Authorization: Bearer $JAMGATE_TOKEN"
+
+# Save (optionally into a namespace — see "Namespaces" above)
+curl -sX POST "$BASE" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"text":"the aorist tense expresses a completed action","scope":"amir/greek","type":"project"}'
+
+# Recall within a scope
+curl -s "$BASE?query=aorist&scope=amir/greek" -H "$AUTH"
+
+# Forget by id, within a scope
+curl -sX DELETE "$BASE/<id>?scope=amir/greek" -H "$AUTH"
+```
+
+| Method & path | Body / query | Returns |
+| --- | --- | --- |
+| `POST /v1/memory` | `{text, scope?, type?, subject?, source?}` (`content`/`memory` accepted as aliases of `text`) | `201` with `{action, memory, …}` when a record lands; `200` with the gate's `action` when it deliberately stores nothing (`duplicate`/`conflict`/`possible_duplicate`/`rejected`) |
+| `GET /v1/memory` | `?query=&scope=&limit=` | `200` with `{memories: […]}` |
+| `DELETE /v1/memory/:id` | `?scope=` | `200 {ok:true,id}`, `404` not found, `409` ambiguous prefix |
+
+Every REST save goes through the **exact same gate** as the MCP tool (dedup, supersession,
+conflict guard, credential refusal), per scope. A missing/wrong token is a `401`; a malformed
+body is a `400`. The MCP endpoint (`/mcp`) and the OAuth flow are unaffected — REST is purely
+additive.
+
 ### Deploy: systemd + Caddy
 
 A `systemd` unit to keep Jamgate running (fill in your user and a real token — ideally load the
@@ -694,7 +752,11 @@ for the full scope):
   with graceful fallback, auto-subject derivation, local decision log.
 - **Remote mode** *(optional)* — self-hosted Streamable HTTP transport with bearer-token
   auth, so one instance can serve all of your agents (phone, browser, laptop) from one
-  shared memory. stdio stays the default.
+  shared memory. stdio stays the default. A plain **REST API** (`/v1/memory`) runs on the
+  same port behind the same token, for app backends that don't speak MCP.
+- **Namespaces (scopes)** *(optional)* — attach a `scope` to keep several isolated memories
+  in one instance; the whole gate applies per scope. Omit it for the default single-tenant
+  behaviour.
 - **One-click install** — `npx jamgate setup` wires every detected client (Claude Code,
   Claude Desktop, Cursor, Windsurf, Gemini CLI, VS Code / Copilot, Cline, Roo Code, OpenCode,
   Zed) in one idempotent, backup-first command, plus a Cursor deeplink and a Claude Desktop
@@ -707,7 +769,7 @@ for the full scope):
   entries only; conversation logs are never mined.
 
 Verified end-to-end over the MCP protocol (both stdio and HTTP) and covered by an automated
-test suite (226 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
+test suite (413 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
 (trained on the local decision log) and multi-device sync (see [`DECISIONS.md`](./DECISIONS.md)).
 **Goal: impact, not profit — open-source (MIT), built in the open.**
 

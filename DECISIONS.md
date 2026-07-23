@@ -938,3 +938,77 @@ strictly a refusal to write; it never edits the file, so no backup is spawned an
 untouched. The lesson generalises D-030: the safe unit isn't "our key" but "our key *and its
 transport*" — changing how a client reaches its memory is as consequential as changing which
 memories it sees.
+
+
+### D-048 — Namespaces (scopes): one instance, many isolated memories
+
+Jamgate began single-tenant: one human, one memory (D-029). An app built on top of it — a
+tutor with several subjects, or one instance shared by a few people — needs to keep memories
+that must not blend. We add an optional `scope` (an opaque label, e.g. `amir/greek`) to a
+memory and to save/recall/forget. **Why a scope and not a second instance for every split:**
+running an instance per subject multiplies deployment, tokens and TLS for what is really one
+person's data; a scope is a field, and the whole gate already reads the memory list once.
+
+The design is **additive and backward-compatible on purpose**, because this store is live:
+
+- **The default scope is invisible.** An absent or empty `scope` normalizes to a single
+  `"default"` namespace, which reproduces the exact pre-namespace behaviour. Every existing
+  client keeps calling `save`/`recall`/`forget` unchanged and lands in `"default"`.
+- **The gate is per scope.** Dedup, subject supersession, the source-trust conflict guard and
+  the semantic near-duplicate check all compare a candidate only against memories in the SAME
+  scope. Two namespaces can hold the same text, the same subject, even contradictory facts,
+  without one touching the other. This is the whole point — isolation has to hold at the gate,
+  not just at read time.
+- **Recall and forget are strictly scoped.** Recall returns only the requested namespace;
+  forget resolves an id (or prefix) only within its scope, so one namespace can never delete
+  another's memory even with the exact id.
+- **Migration, not a rewrite.** `schemaVersion` goes 2→3; on read, any record without a scope
+  is stamped `"default"` (a record already carrying a named scope keeps it), and the upgraded
+  shape persists on the next write — the same auto-migration pattern as D-021/D-023. No data
+  loss, no behaviour change for the existing single-tenant store.
+- **Tool schemas stay permissive.** `scope` is an optional property on all three MCP tools,
+  added the same additive way as the `content`/`memory` aliases (D-039) — no `required` change,
+  nothing existing breaks.
+
+Scopes are only case/whitespace-folded (like a memory's `subject`), never otherwise parsed:
+`user/role` is a convention, not a schema. Multi-USER separation (accounts, auth per person)
+is deliberately still out of scope here (D-029 stands); a scope is a namespace within one
+token-holder's instance, and whoever holds the token can address any scope.
+
+### D-049 — A plain REST API alongside MCP
+
+Jamgate speaks MCP, which is the right protocol for agents but the wrong one for an ordinary
+app backend: a mobile tutor's server wants to `POST` a memory and `GET` a recall, not open a
+JSON-RPC session and drive a tool call. So the HTTP mode (D-029) now also serves a small REST
+API on the same server, behind the same bearer gate:
+
+```
+POST   /v1/memory        {text, scope?, type?, subject?, source?}  → save
+GET    /v1/memory        ?query=&scope=&limit=                     → recall
+DELETE /v1/memory/:id    ?scope=                                   → forget
+```
+
+Decisions that fell out of it:
+
+- **Reuse everything, add nothing to the transport contract.** REST is handled inside the
+  existing `--http` server, after the existing constant-time bearer check (static token OR an
+  OAuth access token) and before the MCP path check. No new port, no new auth path, no change
+  to the MCP transport or the OAuth flow. A missing/wrong token is the same flat 401.
+- **The SAME gate, guaranteed.** Save on both surfaces funnels through one shared
+  `saveThroughGate` (prefilter → subject → `store.save` → gate log), so a REST client gets
+  identical dedup/supersession/conflict/secret-refusal behaviour, per scope (D-048). The MCP
+  tool was refactored onto it too, so the two can never drift — the property is enforced by a
+  test that a REST credential is refused exactly as the tool refuses it.
+- **HTTP status mirrors the gate outcome.** `201` when a record actually landed (created or a
+  recency supersede); `200` for outcomes that understood the request but stored nothing on
+  purpose (duplicate/conflict/near-duplicate, and a prefilter `rejected` with its reason);
+  `400` for a malformed request (bad JSON, missing `text`); `404`/`409` for a forget miss or
+  an ambiguous id prefix. Errors are plain JSON with a stable `error` code — not JSON-RPC,
+  which stays confined to the MCP endpoint.
+- **Field aliases carry over.** `POST` accepts `text`, then `content`, then `memory` (D-039),
+  so a client that mirrors the tool shape works without translation. There is no handshake over
+  REST, so a REST save carries no server-observed client provenance (D-024) — that is inherent
+  to the protocol, not a gap.
+
+REST is a generic feature of any remote Jamgate, the same as the MCP transport — not bespoke to
+one deployment.

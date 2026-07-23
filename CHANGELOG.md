@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-23
+
+### Added
+
+- **Namespaces (scopes)** (D-048). An optional `scope` (an opaque label such as `amir/greek`)
+  can now be attached to a memory and to every operation, so one instance can hold several
+  isolated memories that never blend. The gate itself is per scope — dedup, subject
+  supersession, the source-trust conflict guard and the semantic near-duplicate check all
+  compare a candidate only against memories in the SAME scope — and recall/forget are strictly
+  scoped, so one namespace can never read or delete another's memory even with the exact id.
+  - **Fully backward-compatible.** An absent or empty scope resolves to a single `"default"`
+    namespace that reproduces the exact pre-namespace, single-tenant behaviour. Existing
+    clients call `save`/`recall`/`forget` unchanged and land in `"default"`.
+  - **Auto-migration**: `schemaVersion` 2 → 3. On read, any record without a scope is stamped
+    `"default"` (a record already in a named scope keeps it) and the upgraded shape persists on
+    the next write — no data loss, no behaviour change for an existing store.
+  - The three MCP tools gained an optional `scope` parameter, added the same additive way as
+    the earlier `content`/`memory` aliases — no existing tool call breaks.
+- **REST API alongside MCP** (D-049). The `--http` server now also serves a small REST API on
+  the same port, behind the same bearer token (static or OAuth) as the MCP endpoint, so an
+  ordinary app backend can use Jamgate without speaking JSON-RPC:
+  - `POST /v1/memory` `{text, scope?, type?, subject?, source?}` — save (accepts the
+    `content`/`memory` aliases too);
+  - `GET /v1/memory?query=&scope=&limit=` — recall;
+  - `DELETE /v1/memory/:id?scope=` — forget.
+
+  Saves on REST and MCP funnel through one shared gate pipeline, so they behave identically
+  (dedup, supersession, conflict, secret refusal), per scope. Status codes mirror the gate
+  outcome (`201` created/superseded, `200` for a deliberate no-store or a prefilter rejection,
+  `400`/`404`/`409` for malformed requests and forget misses); errors are plain JSON with a
+  stable `error` code. The MCP transport and the OAuth flow are untouched.
+
+### Changed
+
+- The MCP `save_memory` handler was refactored onto the shared gate pipeline it now shares with
+  the REST API, so the two surfaces can never diverge. No change to its behaviour or replies.
+
 ## [0.9.2] - 2026-07-22
 
 ### Fixed
