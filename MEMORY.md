@@ -48,6 +48,22 @@ Current state of the project. Update this at the end of every work session.
   - **Fixed — deletes were never logged (D-056).** The D-025 corpus recorded every acceptance
     and no reversal; 24 production log-writes had no surviving record and the log explained
     none of them.
+  - **All ten expired records RESTORED through the real gate (2026-08-05).** Not a store
+    write — every one went through `saveThroughGate`, so the prefilter judged it, the store
+    gate judged it, and each decision is in the real gate log. **The gate accepted all ten**
+    (10× `superseded`, each retiring its own expired copy as audit history), including the
+    three that had been recommended for deletion. Types chosen on what the fact IS: `identity`
+    for permanent facts (pay structure, IBAN, government identifiers), `project` for bounded
+    work (reconciliations, period summaries, searches, the appointment). **Production: 53
+    records, 39 active, 0 expired, 39 recallable** — verified by a live recall over the real
+    MCP endpoint. Backup `~/backups/jamgate-droplet-2026-08-05-pre-restore` (SHA-256 verified);
+    no memory text altered; the store moved to schemaVersion 3 and jamgate 0.9.2 was proven
+    able to read it before the push.
+  - **Blocker found and fixed en route (D-057): an expired record blocked its own revival.**
+    Soft-expired records keep `status: "active"`, so the duplicate check counted them as live
+    and answered `duplicate` to the very save that would have brought the fact back — recall
+    said "nothing stored", the gate said "already known", and no third call resolved it. Every
+    one of the ten came back `duplicate` until this was fixed.
   - **Data repaired on the live production store** (backup `~/backups/jamgate-droplet-2026-08-05`,
     SHA-256 verified). `1ba22b6e` (profile+finance master record) carried the auto-derived
     subject `email` — any future `email` memory would have retired it; now
@@ -262,27 +278,11 @@ Genuinely remaining, in the order they matter:
    extension for ChatGPT/Gemini is still unbuilt.
 
 ## Open items
-- **Ten expired production records need jam to rule on their type** *(2026-08-05, deadline
-  2026-08-23 when compaction may delete them).* All ten are historical finance/admin records
-  where no durable type is obviously right, so they were deliberately NOT guessed. Each needs a
-  one-line answer — keep (and as what type) or let it go:
-
-  | id | what it is | recommendation |
-  |---|---|---|
-  | `4b101b77` | eFood pay structure (70/30 split, twice-monthly) — how he is paid | **identity** — a standing arrangement, still current |
-  | `e4d6453d` | Eurobank card lost Jun 2026 + fraud charges; **contains the IBAN** | **identity** — the IBAN is permanent; the incident is closed |
-  | `d0a16edf` | Sajjad loan fully settled 26 Jul, €260, receivable now €0 | **project** — recent and referenced by later finance notes |
-  | `bdb9abaf` | May 2026 financial summary (income/expenses) | **project** — bookkeeping, still in the current year |
-  | `19a89fb3` | Payment reconciliations May–Jun 2026 | **project** — same |
-  | `e0f4af00` | eFood gross income by period, Feb–Jun 2026 | **project** — same |
-  | `87365bb9` | Subscriptions mid-2026 — self-labelled "several cancelled by 24 Jul" | **forget** — it says itself it is stale |
-  | `3131b0c2` | Daily cash expenses May–Jun — self-labelled "granular, low-value historical" | **forget** — it says itself it is low value |
-  | `204d92db` | Laptop bottom-cover purchase receipt, May 2026 | **forget** — a one-off receipt, belongs in the accounting repo |
-  | `bfcc38de` | FORMER residence (Aristotelous 85) building management, "kept in case old-address paperwork" | **identity** if the paperwork is still open, else forget |
-
-  To keep one: re-save it with the durable type (its text is intact in the store and in
-  `~/backups/jamgate-droplet-2026-08-05/memory.json`). To let one go, do nothing — compaction
-  removes it after 2026-08-23.
+- *(RESOLVED 2026-08-05 — see "Where we are right now". All ten expired records were restored
+  through the real gate; the gate accepted all ten. jam's principle: "whether it was junk or
+  not is not my call, the gate is supposed to decide that, not me." Asking him to rule on them
+  was the wrong move — a quality gate that hands the quality decision back to the user has
+  failed at the one thing it exists to do.)*
 - **Mathos — identity settled, deploy plan still unknown.** *(jam, 2026-08-05.)*
 
   **What it is:** a **separate project of jam's, in its own repo — not part of Jamgate and not
