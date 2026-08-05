@@ -9,11 +9,20 @@ describe("embedder loader graceful degradation (D-026)", () => {
     assert.equal(await loadTransformersEmbedder({ JAMGATE_EMBEDDINGS: "false" }), null);
   });
 
-  it("returns null (never throws) when the optional package is absent", async () => {
-    // @huggingface/transformers is an OPTIONAL peer dep and is not installed in CI, so the
-    // dynamic import fails — the loader must degrade to null rather than crash the server.
+  it("never throws, whether or not the optional package is installed", async () => {
+    // @huggingface/transformers is an OPTIONAL peer dep. This assertion used to be a flat
+    // `equal(embedder, null)` on the reasoning that the package is absent in CI — but the
+    // test never ESTABLISHED that absence, it assumed it. On a machine where the peer IS
+    // installed (the supported configuration for semantic recall) the loader correctly
+    // returned a real embedder and the suite failed, reading as a loader regression when
+    // nothing had regressed. So assert the contract that actually holds in BOTH
+    // environments: the call resolves rather than throwing, and yields either null (degrade
+    // to fuzzy recall) or a well-formed Embedder — never anything in between.
     const embedder = await loadTransformersEmbedder({});
-    assert.equal(embedder, null);
+    if (embedder === null) return; // package absent → degraded, which is the CI path
+    assert.equal(typeof embedder.embed, "function");
+    assert.equal(typeof embedder.id, "string");
+    assert.equal(embedder.dimensions, 384);
   });
 });
 
