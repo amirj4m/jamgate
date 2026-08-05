@@ -16,8 +16,11 @@ above all what they're working on right now — delivered as an **MCP server** t
 agent (Claude Code, Cowork, Cursor, …) reads from and writes to, so agents stop being
 isolated islands and the user never re-briefs each one. A **write-time quality gate**
 keeps that shared memory clean, current, contradiction-free and time-aware (otherwise
-sharing just spreads junk). It is store-agnostic (bundles a default store for normal
-users; lets power users bring their own such as mem0 or Graphiti) and **open-source,
+sharing just spreads junk). It is **designed** store-agnostic — the MCP server, the HTTP
+layer and the gate pipeline all depend on the `MemoryStore` interface, never on a concrete
+backend — but today **only the bundled file store is implemented: no mem0 or Graphiti
+adapter exists, and there is no user-facing way to plug one in.** That is a designed seam,
+not a shipped feature; never let a doc imply otherwise. Jamgate is **open-source,
 impact-driven, not a profit play.**
 
 ## The core idea (why it exists)
@@ -36,7 +39,9 @@ another warehouse.**
 ## Architecture (one picture)
 
 ```
-Agent  →  [ Jamgate quality gate · MCP server ]  →  Store (default file/SQLite, or BYO: mem0 / Graphiti)
+Agent  →  [ Jamgate quality gate · MCP server ]  →  Store (today: the bundled file store.
+                                                    The `MemoryStore` seam is where a mem0 /
+                                                    Graphiti adapter would go — none exists.)
           save_memory / recall_memory / forget_memory
           only quality-passing writes get through
 ```
@@ -55,7 +60,8 @@ a small LLM only for the thin "is this worth keeping?" classifier on ambiguous c
 
 - `src/` — the MCP server + the quality-gate pipeline
 - `src/gate/` — the write-time pipeline (rules → agent-trust → classifier)
-- `src/store/` — default store + adapters (file/SQLite first; mem0/Graphiti later)
+- `src/store/` — the `MemoryStore` interface + the bundled file store (the only implementation;
+  mem0/Graphiti adapters are a later possibility, not present)
 - `docs/` — design notes
 - `RULES.md` · `DECISIONS.md` · `MEMORY.md` — the project's rules and state
 

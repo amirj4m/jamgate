@@ -15,9 +15,13 @@ unless every relevant rule below is demonstrably satisfied. If in doubt → not 
   (mem0, Graphiti, Cognee, Supermemory already own it). Our job is to keep that
   shared memory **clean, current, contradiction-free, and time-aware** at write time —
   otherwise sharing just spreads junk (one mem0 audit found 97.8% junk; see D-016).
-- **Neutral and store-agnostic.** The gate sits in front of *any* store and *any*
-  agent. It must never be locked to one store or one vendor. (Zep/Graphiti already
-  does temporal conflict-handling, but only inside its own store — neutrality +
+- **Neutral and store-agnostic — by design, and only by design so far.** The gate must never
+  be locked to one store or one vendor: everything above `src/store/` depends on the
+  `MemoryStore` interface, never on `FileStore`. But be exact about what that means today:
+  **the bundled file store is the only implementation, no mem0/Graphiti adapter exists, and a
+  user cannot point Jamgate at their own store.** It is a seam we have kept clean, not a
+  feature we have shipped, and no README, skill or release note may blur the two. (Zep/Graphiti
+  already does temporal conflict-handling, but only inside its own store — neutrality +
   write-time selectivity in front of *any* store is the open seam.)
 - **Open-source, impact-first.** Optimize for adoption and usefulness, not revenue.
   Open + neutral is the strength here, not a weakness.
@@ -40,7 +44,9 @@ unless every relevant rule below is demonstrably satisfied. If in doubt → not 
 ## 1. Architecture
 
 ```
-Agent → [ quality gate / MCP server ] → Store (default file/SQLite, or BYO mem0/Graphiti)
+Agent → [ quality gate / MCP server ] → Store (today: the bundled file store only.
+                                        BYO mem0/Graphiti is where the seam leads, not
+                                        something that exists.)
 ```
 
 - The gate exposes MCP tools: `save_memory`, `recall_memory`, `forget_memory`.
@@ -50,6 +56,8 @@ Agent → [ quality gate / MCP server ] → Store (default file/SQLite, or BYO m
   - *Normal user* — installs the gate, gets a bundled default store, never hears
     "mem0". For them, the gate **is** the memory.
   - *Power user* — points the gate at their existing store (bring-your-own-store).
+    **Not built.** This is the intended second user type and the reason the `MemoryStore`
+    seam is kept clean, but nothing implements it: today every user is the first kind.
 
 ## 2. The write pipeline — 6 checks before anything is stored
 

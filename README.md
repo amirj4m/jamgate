@@ -240,6 +240,15 @@ Restart the agent. It now has three tools:
 - **`forget_memory`** — delete a memory by the id `recall_memory` printed (the full id, or an
   unambiguous prefix of 8+ characters).
 
+Volatile memories age out of recall on a TTL, so a fact you saved can stop being returned
+without being deleted. `jamgate expired` shows exactly what recall is hiding and when it will
+be compacted away — nothing is modified:
+
+```bash
+jamgate expired               # what has aged out of recall but is still on disk
+jamgate expired --json        # machine-readable, for a script
+```
+
 Your memory lives in `~/.jamgate/memory.json`. Same machine, every agent → one shared
 memory. To share one memory across **different** machines and your phone, see
 [Remote mode](#remote-mode-self-hosted).
@@ -253,8 +262,9 @@ secrets, and treat gate verdicts as answers rather than errors to retry. Its rul
 distilled straight from Jamgate's own [decision log](./DECISIONS.md) (D-040…D-045).
 
 It ships in this repo at [`skills/memory-discipline/SKILL.md`](./skills/memory-discipline/SKILL.md)
-as a portable [agentskills.io](https://agentskills.io) instruction pack, installable into
-70+ coding agents with one command:
+as a portable [agentskills.io](https://agentskills.io) instruction pack. One command installs it
+for every agent the `skills` CLI finds on your machine (it wired 17, including Cursor, Copilot
+and Claude Code, on the machine we tested):
 
 ```bash
 npx skills add amirj4m/jamgate
@@ -763,6 +773,11 @@ weakest at, packaged as a drop-in local MCP server.
 | Dependencies / infra | 1 dep, no server | SDK + service/DB | Graph DB + service |
 | Best for | Keeping one shared personal memory clean, locally | Full-featured app-scale memory | Complex relational/temporal reasoning |
 
+The Jamgate column is verified by the test suite. The other two columns are read from those
+projects' own public documentation as of **August 2026** and describe their default behaviour,
+not the ceiling of what they can be configured to do — if we have a row wrong, open an issue
+and we'll fix it.
+
 Mem0, OpenMemory, Zep, and Graphiti are capable systems built for different goals; if you
 need managed scale or graph reasoning, they're the right tool. Jamgate's bet is that for
 *personal* cross-agent memory, the hard part is quality at write time — and that it should
@@ -771,8 +786,12 @@ be local, free, and one command to install.
 ## Privacy
 
 - **Everything is local.** The memory store, the gate, and (if enabled) the embedding
-  model all run on your machine. Jamgate makes **no network calls** and talks to no cloud
-  AI.
+  model all run on your machine. **Your memories are never sent anywhere** — Jamgate makes
+  no outbound request carrying your data, has no telemetry, and talks to no cloud AI.
+  The one network access in the whole product is the optional embedding model's **first-run
+  download** from Hugging Face (~23 MB, cached, and only if you installed that optional
+  package); it downloads weights, it does not upload text. `npx` itself fetching the package
+  from npm is the other, and both stop after install.
 - **The decision log is local too.** Every gate decision (saved / duplicate / superseded /
   conflict / possible_duplicate / rejected, with its reason) is appended to a strictly
   local, size-capped JSONL file that rotates automatically and **never leaves your
@@ -814,7 +833,7 @@ for the full scope):
   entries only; conversation logs are never mined.
 
 Verified end-to-end over the MCP protocol (both stdio and HTTP) and covered by an automated
-test suite (413 tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
+test suite (460+ tests) on Node 20.x and 22.x. Next: a thin classifier for ambiguous cases
 (trained on the local decision log) and multi-device sync (see [`DECISIONS.md`](./DECISIONS.md)).
 **Goal: impact, not profit — open-source (MIT), built in the open.**
 

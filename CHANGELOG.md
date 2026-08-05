@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-08-05
+
+Every claim in the README was checked against the running server before this release — the
+gate-layer table row by row, the tool contracts, the REST and OAuth surfaces, export/import,
+and the install paths. Sixteen behavioural claims were verified end-to-end over a real MCP
+handshake and all sixteen held. The corrections below are the ones that did not.
+
+### Documentation
+
+- **"Jamgate makes no network calls" was not true.** The optional embedding model is
+  downloaded from Hugging Face on first use — the README said so in one section and denied it
+  in another. The Privacy section now states the promise that actually holds (*your memories
+  are never sent anywhere; no telemetry, no cloud AI*) and names the two network accesses that
+  exist: the optional model download and `npx` fetching the package. Both are inbound
+  artifacts, neither carries your text, and both stop after install.
+- **The store-agnostic claim is now stated as a seam, not a feature** (`RULES.md` §0/§1,
+  `AGENTS.md`). Everything above `src/store/` really does depend only on the `MemoryStore`
+  interface — but the bundled file store is the only implementation, no mem0 or Graphiti
+  adapter exists, and there is no user-facing way to point Jamgate at another store. The
+  project docs described the intended end state in the present tense. They now say plainly
+  that a user cannot do this today, and forbid any doc from blurring the two.
+- **The test count was 50 releases of drift behind** — the README advertised 413 tests
+  against an actual 463. It now reads "460+", which cannot silently overstate.
+- **The comparison table says where its numbers come from.** The Jamgate column is verified by
+  the test suite; the Mem0 and Zep/Graphiti columns are read from those projects' public
+  documentation as of August 2026 and describe default behaviour, with an invitation to
+  correct a wrong row. Comparing yourself to other people's projects from memory is how a
+  launch earns a deserved argument.
+- **The agent-skill claim is now the observed one.** "Installable into 70+ coding agents" was
+  a number from the ecosystem's marketing; running `npx skills add amirj4m/jamgate` on a clean
+  machine wired **17** agents, which is what the README now says.
+- **`jamgate expired` is documented.** It has shipped since D-055 and appeared nowhere a user
+  would look — so the one command that answers "where did my memory go?" was invisible to
+  exactly the person asking.
+
 ## [0.10.3] - 2026-08-05
 
 ### Fixed
