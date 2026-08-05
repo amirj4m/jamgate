@@ -40,17 +40,68 @@
  */
 export const DEFAULT_DUP_THRESHOLD = 0.88;
 
-/** Blend weights for combining the lexical (fuzzy) score with the semantic score during
- *  recall. Semantic leads because it is what adds synonym reach; fuzzy anchors on exact
- *  surface matches the embedding can under-weight. Both operands are expected in [0, 1]. */
-const SEMANTIC_WEIGHT = 0.6;
-const LEXICAL_WEIGHT = 0.4;
+/**
+ * Blend weights for combining the lexical (fuzzy) score with the semantic score during
+ * recall. Both operands are expected in [0, 1].
+ *
+ * Semantic used to lead at 0.6/0.4, on the assumption that synonym reach is what recall was
+ * missing. Measured against the real model over a real store (17 recall queries, jam's own
+ * 12 memories plus the short facts from the gate log, D-063), that assumption is false — a
+ * semantic-led blend RANKS WORSE than no embeddings at all:
+ *
+ *   semantic 0.6 / lexical 0.4   top-1  6/17   top-5 14/17   ← what shipped
+ *   semantic 0.5 / lexical 0.5   top-1  7/17   top-5 13/17
+ *   semantic 0.4 / lexical 0.6   top-1  9/17   top-5 13/17
+ *   semantic 0.3 / lexical 0.7   top-1 10/17   top-5 13/17   ← now
+ *   semantic 0.2 / lexical 0.8   top-1 10/17   top-5 13/17
+ *   embeddings off (pure fuzzy)  top-1  8/17   top-5 11/17
+ *
+ * The cause is that MiniLM is mean-pooled: a three-word query against a real 500-character
+ * memory dilutes to a middling cosine, while two SHORT unrelated facts that merely share a
+ * surface shape score high — "where does jam live" scored 0.645 against "jam started
+ * jamgate" but only 0.414 against "Lives in Berlin". Weighting that signal at 0.6 let it
+ * outvote a lexical scorer that had the right answer.
+ *
+ * So lexical leads and semantic assists: 0.3/0.7 beats pure fuzzy on BOTH metrics (the only
+ * setting that does) and beats the old blend by four top-1 answers. 0.2 ties it on this
+ * corpus; 0.3 is the point where top-1 saturates, so it keeps the most synonym reach for the
+ * same measured ranking.
+ */
+const SEMANTIC_WEIGHT = 0.3;
+const LEXICAL_WEIGHT = 0.7;
 
-/** Minimum semantic similarity for an embedding match to pull an otherwise lexically
- *  irrelevant memory into recall. High enough to admit true synonyms (~0.6–0.8 on MiniLM)
- *  while excluding the moderate baseline similarity (~0.2–0.4) unrelated short texts show —
- *  without this floor, semantic noise would flood recall. */
-export const DEFAULT_SEMANTIC_MIN = 0.5;
+/**
+ * Minimum semantic similarity for an embedding match to pull an otherwise lexically
+ * irrelevant memory into recall. This is the ONLY thing that earns synonym reach: a query
+ * with no shared words reaches a memory through this floor or not at all.
+ *
+ * It was 0.5 on an estimate ("true synonyms land ~0.6–0.8"). Measured on the real model
+ * that is too high, and the README's own advertised example was one of the casualties
+ * (D-063). Pure-synonym pairs — no shared word, so lexical scores 0.000 and the floor is
+ * the only way in:
+ *
+ *   0.742  "what vehicle does jam own"        ~ "jam drives a Toyota Corolla"
+ *   0.695  "what distro is on jam's laptop"   ~ "jam uses Linux"
+ *   0.642  "does jam owe anyone money"        ~ (the debts-settled memory)
+ *   0.507  "attorney fees"                    ~ (the lawyer-cost memory)
+ *   0.422  "automobile"                       ~ "jam drives a Toyota Corolla"  ← the README's
+ *   0.464  "policy on third-party libraries"  ~ "…strict no-dependencies policy…"
+ *
+ * Against 102 measured unrelated pairs (six deliberately off-topic queries — weather, pizza,
+ * the capital of France, sourdough, a dentist appointment, a car nobody owns — over the whole
+ * real store) the highest similarity of ANY unrelated pair was 0.204, and in a store of short
+ * facts the runners-up behind a true synonym match sat at 0.18 and below.
+ *
+ * 0.35 therefore sits in real empty space: above every unrelated pair we could produce
+ * (0.204) and below every pure-synonym pair that matters (0.422). Unlike the near-duplicate
+ * bar (D-045), these two populations genuinely do separate here — a query is a different kind
+ * of object from a memory, and "unrelated to the question" is a cleaner call than "restated
+ * versus changed". The band 0.25–0.40 is where weak-but-real associations live; setting the
+ * floor at the bottom of the true-positive cluster rather than the top of the noise cluster
+ * is the deliberate trade, because the cost of a stray recall result is one extra line the
+ * agent can ignore, while the cost of a miss is the feature silently not existing.
+ */
+export const DEFAULT_SEMANTIC_MIN = 0.35;
 
 /**
  * Cosine similarity of two equal-length vectors, in [-1, 1]. Returns 0 for a zero vector

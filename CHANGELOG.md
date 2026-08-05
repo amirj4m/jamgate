@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-08-05
+
+### Fixed
+
+- **Semantic recall now actually fires — including the example the README advertised**
+  (D-063). Both numbers governing the optional embedding layer were set from estimates and
+  never measured against the model that ships. Measured on all-MiniLM-L6-v2 over a real
+  store (17 recall queries, 6 off-topic controls, written before any score was seen):
+
+  - **The recall floor drops from 0.50 to 0.35.** Pure-synonym pairs — no shared word, so the
+    lexical scorer contributes nothing and this floor is the only route in — measure
+    0.42–0.74, while the noisiest of 102 unrelated pairs reached only 0.204. 0.50 sat above
+    six of the seven true positives, including the README's own *"'automobile' recalls a
+    memory about your car"* (0.422). That example now works end-to-end over MCP.
+  - **The recall blend flips from 0.6·semantic + 0.4·lexical to 0.3·semantic + 0.7·lexical.**
+    This was the bigger defect: the semantic-led blend *ranked worse than having no
+    embeddings at all* (top-1 6/17 versus 8/17), because mean pooling scores two short facts
+    that share a surface shape higher than a query against the memory that answers it —
+    "where does jam live" scored 0.645 against "jam started jamgate" but 0.414 against
+    "Lives in Berlin". Lexical now leads and semantic assists: top-1 10/17, top-5 13/17,
+    the only setting measured that beats pure fuzzy recall on both.
+
+  Installing the optional dependency previously made recall measurably worse. It now makes it
+  better. The measurements live in `src/embeddings/vector.ts` and are asserted in
+  `test/vector.test.ts` so they can be revised with evidence rather than with a better guess.
+
+- **`package-lock.json` is now part of the version-lockstep guard.** It carries the version
+  twice, `npm install` rewrites it silently, and nothing in a build or test run reads it — so
+  it had drifted to `0.9.2` while the package was `0.10.2`, three releases behind, without
+  failing anything. Same guard as `src/version.ts` and `server.json`, for the same reason.
+
+### Documentation
+
+- **README states what the semantic layer does and does not do.** Two limits that were true
+  but undocumented: embeddings attach at *save* time, so memories written before the optional
+  package was installed stay on fuzzy recall until re-saved (there is no backfill command);
+  and long memories dilute under mean pooling, so synonym reach is strongest on short,
+  single-fact memories.
+
 ## [0.10.2] - 2026-08-05
 
 ### Documentation

@@ -281,6 +281,17 @@ that is semantically near-identical to an existing memory comes back as a
 `possible_duplicate` for you to confirm. **If the package isn't installed, Jamgate runs
 on fuzzy recall — nothing breaks.**
 
+**What to expect from it, measured rather than assumed** ([D-063](./DECISIONS.md)): the
+thresholds are set from real cosines on this model over a real store, not from estimates.
+Two limits are worth knowing before you install it:
+
+- **Embeddings attach when a memory is saved.** Memories written *before* you installed the
+  package have no vector, so they stay on fuzzy recall until they are saved again. There is
+  no backfill command yet.
+- **Long memories dilute.** The model mean-pools, so a short query against a 500-character
+  memory scores lower than against a one-line fact. Synonym reach is strongest exactly where
+  the README's example is — short, single-fact memories.
+
 ## Namespaces (scopes)
 
 By default Jamgate is single-tenant: one human, one memory. If you need **one instance to hold

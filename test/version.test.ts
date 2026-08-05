@@ -69,3 +69,33 @@ describe("server.json (MCP registry manifest)", () => {
     for (const entry of s.packages) assert.equal(entry.identifier, p.name);
   });
 });
+
+/**
+ * Third copy of the number, and the one nobody thinks about. `package-lock.json` records the
+ * version twice, `npm install` rewrites it silently, and nothing in a build or test run reads
+ * it — so it drifted to three releases behind (`0.9.2` while the package was `0.10.2`) without
+ * ever failing anything. A stale lockfile version is not a runtime bug, but it is a lie in a
+ * file people read to answer "what version is this checkout", and it is exactly the kind of
+ * quiet drift D-060 exists to stop. Same guard, same reason.
+ */
+describe("package-lock.json", () => {
+  it("records the same version as package.json, at both levels", () => {
+    const lockUrl = new URL("../../package-lock.json", import.meta.url);
+    const lock = JSON.parse(readFileSync(lockUrl, "utf8")) as {
+      version: string;
+      packages: Record<string, { version?: string }>;
+    };
+    const pkgUrl = new URL("../../package.json", import.meta.url);
+    const pkg = JSON.parse(readFileSync(pkgUrl, "utf8")) as { version: string };
+    assert.equal(
+      lock.version,
+      pkg.version,
+      `package-lock.json (${lock.version}) is out of sync with package.json (${pkg.version}); run npm install after bumping`,
+    );
+    assert.equal(
+      lock.packages[""]?.version,
+      pkg.version,
+      `package-lock.json packages[""].version (${lock.packages[""]?.version}) is out of sync with package.json (${pkg.version})`,
+    );
+  });
+});

@@ -1406,3 +1406,74 @@ missing what it is for.
 literally, and literal obedience fails at exactly the edge cases the rule was written for.
 State the reason, and the boundary becomes something a reader can work out for a case nobody
 anticipated.
+
+### D-063 — The semantic layer was tuned on estimates, and the README advertised the failure
+
+`DEFAULT_SEMANTIC_MIN = 0.5` and the recall blend `0.6·semantic + 0.4·lexical` were both set
+from plausible-sounding estimates ("true synonyms land around 0.6–0.8"). Neither was ever
+measured against the model actually shipped. Both were wrong, and the README's own worked
+example — *"so 'automobile' recalls a memory about your car"* — was one of the things that
+did not work. The first thing a curious stranger would type was the one case we had
+documented and broken.
+
+**What was measured.** all-MiniLM-L6-v2, the model Jamgate downloads, over jam's real store
+(12 memories, median 501 characters) plus the short facts that really passed the gate,
+against 17 recall queries and 6 deliberately off-topic controls, all written before any score
+was seen.
+
+*The floor.* Pure-synonym pairs — no shared word, so the lexical scorer contributes 0.000 and
+this floor is the only way in:
+
+| similarity | query ~ memory |
+| --- | --- |
+| 0.742 | "what vehicle does jam own" ~ "jam drives a Toyota Corolla" |
+| 0.695 | "what distro is on jam's laptop" ~ "jam uses Linux" |
+| 0.642 | "does jam owe anyone money" ~ (the debts-settled memory) |
+| 0.507 | "attorney fees" ~ (the lawyer-cost memory) |
+| 0.464 | "policy on third-party libraries" ~ (the no-dependencies memory) |
+| **0.422** | **"automobile" ~ "jam drives a Toyota Corolla"** — the README's own example |
+
+Across 102 unrelated pairs (the off-topic queries against every memory) the highest
+similarity **any** of them reached was 0.204. So unlike the near-duplicate bar in D-045,
+these two populations *do* separate, and the gap is wide: 0.204 to 0.422 with nothing in it.
+The floor moves to **0.35**, inside that gap. 0.5 sat above six of the seven true positives.
+
+Why this separates when D-045's did not: a query is a different kind of object from a memory.
+"Unrelated to the question" is a cleaner judgment than "restated versus changed" — the latter
+compares two memories that are *about the same thing* by construction, which is exactly the
+region where cosine carries no information.
+
+*The blend, which turned out to be the bigger defect.* Ranking the same 17 queries:
+
+| weights | top-1 | top-5 |
+| --- | --- | --- |
+| 0.6 semantic / 0.4 lexical | 6/17 | 14/17 | ← what shipped |
+| 0.5 / 0.5 | 7/17 | 13/17 |
+| 0.4 / 0.6 | 9/17 | 13/17 |
+| **0.3 / 0.7** | **10/17** | **13/17** | ← now |
+| 0.2 / 0.8 | 10/17 | 13/17 |
+| embeddings off | 8/17 | 11/17 |
+
+**Turning the semantic layer on made recall rank worse than not having it at all** — 6/17
+against 8/17 at rank 1. Installing the optional dependency actively degraded the product, and
+nothing would have revealed that except measuring it. The cause is mean pooling: a three-word
+query against a 500-character memory dilutes to a middling cosine, while two *short* facts
+that merely share a surface shape score high. "where does jam live" scored **0.645** against
+the unrelated "jam started jamgate" but only **0.414** against "Lives in Berlin". At weight
+0.6 that noise outvoted a lexical scorer holding the right answer.
+
+So lexical leads and semantic assists, at 0.3/0.7 — the only setting measured that beats pure
+fuzzy on *both* metrics, and four top-1 answers better than what shipped. 0.2 ties it; 0.3 is
+where top-1 saturates, so it keeps the most synonym reach for the same measured ranking.
+
+**Honest limits of this measurement.** One user's store, 17 queries, written by the person who
+then read the results. It is enough to reject 0.5 and a semantic-led blend — those fail on
+their own documented example — and enough to prefer 0.35/0.3-0.7. It is not enough to claim
+these are optimal. The numbers are in `src/embeddings/vector.ts` and asserted in
+`test/vector.test.ts` so the next person can move them with better evidence rather than a
+better guess.
+
+**The general rule this encodes:** a threshold with a confident comment and no measurement is
+a guess wearing a lab coat, and the comment is what stops anyone from checking. When a number
+decides whether a feature fires at all, the cost of measuring it once is an afternoon and the
+cost of not measuring it is shipping a documented example that does not run.
