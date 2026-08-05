@@ -7,6 +7,43 @@ export type MemoryType = "identity" | "project" | "preference" | "state";
 export type MemorySource = "agent-inferred" | "user-confirmed" | "user-explicit";
 export type MemoryStatus = "active" | "superseded";
 
+/**
+ * The valid `type` values, as DATA rather than only as a TypeScript union (D-054).
+ *
+ * The union above is erased at runtime, and the enum the MCP tool advertises in its
+ * `inputSchema` is a hint to the model, not a constraint the server applies — so an
+ * unrecognized type used to be cast straight through to the store. Auditing the real
+ * production store found `type: "profile"` sitting on a live record, and because
+ * `computeExpiresAt` returns undefined for a type it does not know, that typo silently
+ * turned into "never expires". Every boundary that accepts a caller-supplied type
+ * validates against this list.
+ */
+export const MEMORY_TYPES: readonly MemoryType[] = [
+  "identity",
+  "project",
+  "preference",
+  "state",
+];
+
+/** Runtime type guard for {@link MemoryType}. */
+export function isMemoryType(value: unknown): value is MemoryType {
+  return typeof value === "string" && (MEMORY_TYPES as readonly string[]).includes(value);
+}
+
+/** The valid `source` values as data, for the same reason as {@link MEMORY_TYPES}. A bad
+ *  source is less dangerous than a bad type (it feeds the trust ladder, not the TTL) but it
+ *  is the same class of hole, so it is closed at the same boundaries. */
+export const MEMORY_SOURCES: readonly MemorySource[] = [
+  "agent-inferred",
+  "user-confirmed",
+  "user-explicit",
+];
+
+/** Runtime type guard for {@link MemorySource}. */
+export function isMemorySource(value: unknown): value is MemorySource {
+  return typeof value === "string" && (MEMORY_SOURCES as readonly string[]).includes(value);
+}
+
 /** Which MCP client wrote this memory, captured server-side from the `clientInfo` in the
  *  MCP `initialize` handshake — NOT self-reported by the calling agent in the tool call.
  *  Provenance we can trust: it says which app (Claude Code, Cursor, Cowork, …) and version
@@ -103,7 +140,10 @@ export interface SaveResult {
  * one memory (D-041) — the caller has to tell the agent apart from "no such memory".
  */
 export type ForgetResult =
-  | { ok: true; id: string }
+  /** `memory` is the record that was deleted. Returned so the caller can log the deletion
+   *  with its text and metadata (D-056) without a second read. Optional so an adapter that
+   *  cannot cheaply produce it still satisfies the contract. */
+  | { ok: true; id: string; memory?: Memory }
   | { ok: false; reason: "not-found" }
   | { ok: false; reason: "ambiguous"; matches: string[] };
 
@@ -125,4 +165,7 @@ export interface MemoryStore {
    *  Operates WITHIN `scope` (D-048): an id in another scope is not found here, so one
    *  namespace can never delete another's memory. Absent/empty → the default scope. */
   forget(idOrPrefix: string, scope?: string): Promise<ForgetResult>;
+  /** Active-but-expired records, hidden from recall yet still on disk (D-055). Optional: a
+   *  backend with no TTL concept simply omits it, and callers degrade to "cannot report". */
+  listExpired?(scope?: string): Promise<Array<{ memory: Memory; compactableAt: string }>>;
 }

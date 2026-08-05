@@ -143,7 +143,11 @@ describe("FileStore recall and forget", () => {
     try {
       const { memory } = await store.save({ text: "jam uses Linux", source: "user-explicit" });
 
-      assert.deepEqual(await store.forget(memory.id), { ok: true, id: memory.id });
+      const deleted = await store.forget(memory.id);
+      assert.equal(deleted.ok, true);
+      assert.equal(deleted.ok && deleted.id, memory.id);
+      // The deleted record is handed back so a caller can log the reversal (D-056).
+      assert.equal(deleted.ok && deleted.memory?.text, "jam uses Linux");
       assert.deepEqual(await store.recall("", 10), []);
     } finally {
       await cleanup();

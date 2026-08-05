@@ -11,7 +11,7 @@ import type { MemoryStore } from "./store/types.js";
 import { VERSION } from "./version.js";
 import { createServer } from "./index.js";
 import { resolveGateLogConfig, type GateLogConfig } from "./gate/log.js";
-import { saveThroughGate } from "./gate/pipeline.js";
+import { forgetThroughGate, saveThroughGate } from "./gate/pipeline.js";
 import { normalizeScope } from "./store/scope.js";
 import type { OAuthStore } from "./oauth/store.js";
 import { handleOAuth, resourceMetadataUrl } from "./oauth/handlers.js";
@@ -81,6 +81,14 @@ export function parseCliOptions(
   }
 
   return { http, port };
+}
+
+/** Query-string truthiness for boolean REST flags (`?expired=1`, `?expired=true`). A bare
+ *  `?expired` (empty value) counts as true — that is how a human types a flag. */
+function isTruthyParam(value: string | null): boolean {
+  if (value === null) return false;
+  const v = value.trim().toLowerCase();
+  return v === "" || v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
 function isTruthyEnv(value: string | undefined): boolean {
@@ -461,8 +469,13 @@ async function handleRest(
       ctx.gateLog,
     );
     if (!outcome.ok) {
-      // The prefilter turned it away (junk/secret/…). The request was well-formed, so 200 with
-      // the decision — not a 4xx — mirroring how the gate reports a non-store outcome.
+      // An unknown `type`/`source` is a malformed REQUEST, not a verdict on the content
+      // (D-054) — 400, the same as a missing `text`. A prefilter rejection is a well-formed
+      // request the gate deliberately turned away, so it stays a 200 carrying the decision.
+      if (outcome.kind === "invalid_argument") {
+        sendJson(res, 400, { error: "invalid_request", message: outcome.reason });
+        return true;
+      }
       sendJson(res, 200, { action: "rejected", reason: outcome.reason });
       return true;
     }
@@ -477,19 +490,50 @@ async function handleRest(
       ...(r.conflictsWith ? { conflictsWith: r.conflictsWith.map(publicMemory) } : {}),
       ...(r.possibleDuplicates ? { possibleDuplicates: r.possibleDuplicates.map(publicSimilar) } : {}),
       ...(r.relatedMemories ? { relatedMemories: r.relatedMemories.map(publicSimilar) } : {}),
+      // Warnings that travel with a successful save — today, a human-sourced memory given a
+      // short TTL (D-055). Omitted entirely when there are none, so the common shape is
+      // unchanged for existing clients.
+      ...(outcome.notices.length > 0 ? { notices: outcome.notices } : {}),
     });
     return true;
   }
 
   // GET /v1/memory?query=&scope=&limit= — recall within a scope.
+  // GET /v1/memory?expired=1&scope=  — the records recall is hiding (D-055).
   if (isCollection && req.method === "GET") {
     const query = url.searchParams.get("query") ?? "";
     const scope = url.searchParams.get("scope") ?? undefined;
+    if (isTruthyParam(url.searchParams.get("expired"))) {
+      if (typeof ctx.store.listExpired !== "function") {
+        sendJson(res, 501, {
+          error: "not_supported",
+          message: "this store cannot report expired records",
+        });
+        return true;
+      }
+      const expired = await ctx.store.listExpired(scope);
+      sendJson(res, 200, {
+        expired: expired.map((e) => ({
+          memory: publicMemory(e.memory),
+          compactableAt: e.compactableAt,
+        })),
+      });
+      return true;
+    }
     const limitRaw = url.searchParams.get("limit");
     const parsed = limitRaw === null ? NaN : Number(limitRaw);
     const limit = Number.isInteger(parsed) && parsed > 0 ? parsed : 5;
     const memories = await ctx.store.recall(query, limit, false, scope);
-    sendJson(res, 200, { memories: memories.map(publicMemory) });
+    // Report how many records recall is hiding, so a REST client can never mistake
+    // "everything aged out" for "nothing was ever stored" (D-055).
+    const hidden =
+      typeof ctx.store.listExpired === "function"
+        ? (await ctx.store.listExpired(scope).catch(() => [])).length
+        : 0;
+    sendJson(res, 200, {
+      memories: memories.map(publicMemory),
+      ...(hidden > 0 ? { expiredHidden: hidden } : {}),
+    });
     return true;
   }
 
@@ -501,7 +545,8 @@ async function handleRest(
       sendJson(res, 400, { error: "invalid_request", message: "a memory id is required in the path" });
       return true;
     }
-    const result = await ctx.store.forget(id, scope);
+    // Same logged delete path as the MCP tool (D-056).
+    const result = await forgetThroughGate(ctx.store, id, scope, ctx.gateLog);
     if (result.ok) {
       sendJson(res, 200, { ok: true, id: result.id });
     } else if (result.reason === "ambiguous") {

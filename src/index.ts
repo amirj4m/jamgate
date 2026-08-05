@@ -14,9 +14,10 @@ import { parseCliOptions, startHttpServer } from "./http.js";
 import { OAuthStore } from "./oauth/store.js";
 import { setupCommand, statusCommand } from "./setup/cli.js";
 import { exportCommand, importCommand } from "./backup/cli.js";
+import { expiredCommand } from "./store/expiredCli.js";
 import type { ClientInfo, MemoryStore } from "./store/types.js";
 import { resolveGateLogConfig, type GateLogConfig } from "./gate/log.js";
-import { saveThroughGate } from "./gate/pipeline.js";
+import { forgetThroughGate, saveThroughGate } from "./gate/pipeline.js";
 
 /**
  * Build the Jamgate MCP server around a given store. Factored out of the stdio bootstrap
@@ -213,6 +214,16 @@ export function createServer(
         gateLog,
       );
       if (!outcome.ok) {
+        // An unknown `type`/`source` is a usage error, not a verdict (D-037, D-054): answer
+        // with isError so the caller sees it failed rather than reading it as "the gate judged
+        // my memory and said no", which is what a plain rejection message means.
+        if (outcome.kind === "invalid_argument") {
+          console.error(`jamgate: save_memory called with an invalid argument — ${outcome.reason}`);
+          return {
+            isError: true,
+            content: [{ type: "text", text: `save_memory failed: ${outcome.reason}.` }],
+          };
+        }
         return { content: [{ type: "text", text: `Rejected by gate: ${outcome.reason}.` }] };
       }
       const result = outcome.result;
@@ -276,17 +287,23 @@ export function createServer(
             `forget the copy just saved [id ${result.memory.id}].`;
         }
       }
+      // Warnings that belong with the save itself — today, "you asked for this to be
+      // remembered and it expires in two days" (D-055). Appended rather than replacing the
+      // outcome text: the save DID happen exactly as asked, and the caller needs both facts.
+      for (const notice of outcome.notices) msg += `\nNote — ${notice}`;
       return { content: [{ type: "text", text: msg }] };
     }
 
     if (name === "recall_memory") {
-      const hits = await store.recall(
-        String(args.query ?? ""),
-        Number(args.limit ?? 5),
-        false,
-        args.scope ? String(args.scope) : undefined,
-      );
-      if (hits.length === 0) return { content: [{ type: "text", text: "No matching memories." }] };
+      const scope = args.scope ? String(args.scope) : undefined;
+      const hits = await store.recall(String(args.query ?? ""), Number(args.limit ?? 5), false, scope);
+      if (hits.length === 0) {
+        // The empty answer is exactly where a hidden expired record misleads most — "nothing
+        // is stored" and "everything stored has aged out" look identical from here (D-055).
+        return {
+          content: [{ type: "text", text: `No matching memories.${await expiredFooter(store, scope)}` }],
+        };
+      }
       // The id goes on its own line, last, with nothing punctuating it (D-041). Inline
       // `(id …, <date>)` put a comma against the id and buried it after a memory that can
       // run for paragraphs — agents copied a truncated or comma-suffixed id into
@@ -299,12 +316,18 @@ export function createServer(
             `  id: ${m.id}`,
         )
         .join("\n");
-      return { content: [{ type: "text", text: body }] };
+      return { content: [{ type: "text", text: body + (await expiredFooter(store, scope)) }] };
     }
 
     if (name === "forget_memory") {
       const given = String(args.id ?? "");
-      const res = await store.forget(given, args.scope ? String(args.scope) : undefined);
+      // Deletes go through the same logged path as saves (D-056).
+      const res = await forgetThroughGate(
+        store,
+        given,
+        args.scope ? String(args.scope) : undefined,
+        gateLog,
+      );
       if (res.ok) return { content: [{ type: "text", text: `Forgotten (id ${res.id}).` }] };
       const msg =
         res.reason === "ambiguous"
@@ -319,6 +342,32 @@ export function createServer(
   });
 
   return server;
+}
+
+/**
+ * A one-line footer naming how many memories in this scope have expired out of recall (D-055).
+ *
+ * Soft expiry is invisible by construction: recall filters those records out and says nothing.
+ * A real store was audited at 44% expired with no surface anywhere reporting it, so every
+ * recall now carries the count and points at `jamgate expired`, which lists them. Best-effort
+ * — a store adapter that cannot report expiry (the capability is optional) simply gets no
+ * footer, and a failure here must never break a recall that otherwise succeeded.
+ */
+async function expiredFooter(store: MemoryStore, scope?: string): Promise<string> {
+  if (typeof store.listExpired !== "function") return "";
+  try {
+    const expired = await store.listExpired(scope);
+    if (expired.length === 0) return "";
+    const soonest = expired[0].compactableAt.slice(0, 10);
+    return (
+      `\n\n(${expired.length} memor${expired.length === 1 ? "y has" : "ies have"} expired in ` +
+      `this scope and ${expired.length === 1 ? "is" : "are"} hidden from recall — still on ` +
+      `disk, deletable by compaction from ${soonest}. Run \`jamgate expired\` to see them, ` +
+      `and re-save anything that should have lasted with a durable type.)`
+    );
+  } catch {
+    return "";
+  }
 }
 
 /** Build the default FileStore, wiring in optional local embeddings (D-026). Shared by the
@@ -357,6 +406,11 @@ async function main() {
   }
   if (argv[0] === "import") {
     process.exitCode = await importCommand(argv.slice(1));
+    return;
+  }
+  // Expiry visibility (D-055): report what recall is hiding. Read-only, like status/export.
+  if (argv[0] === "expired") {
+    process.exitCode = await expiredCommand(argv.slice(1));
     return;
   }
 

@@ -1163,3 +1163,39 @@ a request that never arrives cannot be observed. So it belongs in the deploy che
 OUTSIDE the component, adding to that surface is a two-place change, and the second place must
 be written down where the deploy happens. Shipping a feature is not the same as exposing it,
 and the gap between them is invisible from the inside.
+
+### D-054 — A schema declared to the model is not enforcement
+
+`save_memory`'s `inputSchema` has always declared
+`type: { enum: ["identity","project","preference","state"] }`. That enum is a hint the model
+usually follows; it is not a constraint the server applies. The handler did
+`args.type ? String(args.type) : undefined` and the pipeline cast the result to `MemoryType`,
+so any string a caller sent went to the store unchallenged. TypeScript did not help — the
+union is erased at runtime, and the cast is precisely where it was erased.
+
+The consequence was not cosmetic. `type` is what `computeExpiresAt` reads to assign a
+lifespan, and it returns `undefined` for a type it does not recognize — which the store
+records as **never expires**. So a typo did not fail; it silently promoted a two-day memory to
+a permanent one.
+
+Found by auditing the REAL production store, not by the test suite:
+
+```
+a74458fb  type="profile"  expiresAt=<none>  "[profile+career] jam lives in Athens, Greece …"
+```
+
+Every synthetic test passed a valid type, so nothing exercised the path. That is the real
+lesson here — a suite that only ever sends well-formed values cannot discover that
+well-formedness was never checked.
+
+**Decision:** `MEMORY_TYPES` and `MEMORY_SOURCES` exist as runtime data with `isMemoryType` /
+`isMemorySource` guards, and `saveThroughGate` validates both before the prefilter runs. An
+unknown value is an `invalid_argument` outcome — a distinct third kind, separate from a gate
+`rejected` — so the MCP tool answers `isError` and REST answers `400`, and neither is logged
+as a gate decision. That is D-037's line: a usage error is not a verdict about the memory.
+Both transports get it from the one shared pipeline, so they cannot drift (D-049).
+
+**The general rule this encodes:** any enum the STORE's behaviour depends on must be validated
+in code at the boundary. A schema published to a model, a TypeScript union, and a doc comment
+are three kinds of documentation; none of them is a check. And when the enum decides a
+lifespan, the failure mode of not checking is silent data retention, not a loud error.

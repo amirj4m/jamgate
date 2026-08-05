@@ -148,8 +148,13 @@ describe("forget is scoped (D-048)", () => {
       assert.deepEqual(await store.forget(id), { ok: false, reason: "not-found" });
       assert.equal((await store.recall("", 10, false, "amir/greek")).length, 1);
 
-      // Right scope → deleted.
-      assert.deepEqual(await store.forget(id, "amir/greek"), { ok: true, id });
+      // Right scope → deleted, and the deleted record comes back so the caller can log the
+      // reversal (D-056).
+      const deleted = await store.forget(id, "amir/greek");
+      assert.equal(deleted.ok, true);
+      assert.equal(deleted.ok && deleted.id, id);
+      assert.equal(deleted.ok && deleted.memory?.text, "the middle voice");
+      assert.equal(deleted.ok && deleted.memory?.scope, "amir/greek");
       assert.equal((await store.recall("", 10, false, "amir/greek")).length, 0);
     } finally {
       await cleanup();
