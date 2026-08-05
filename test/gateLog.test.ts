@@ -213,3 +213,112 @@ describe("gate decision log (D-025)", () => {
     // Nothing global to clean; each test cleans its own temp dir.
   });
 });
+
+/**
+ * D-056. `forget` wrote nothing to the log. D-025 states that this file is the training
+ * corpus for the future classifier, and a corpus of every acceptance with no reversal teaches
+ * the wrong lesson twice: memories the user later threw away read as good examples, and the
+ * correction signal is absent entirely. Auditing the real store made it concrete — 24
+ * production log-writes had no surviving record and the log explained none of them.
+ */
+describe("deletes are logged like saves (D-056)", () => {
+  it("records a forgotten decision carrying the deleted memory's own metadata", async () => {
+    const { path, dir, config } = await tempLog();
+    const { store, cleanup } = await tempStore();
+    const server = createServer(store, config);
+    const client = new Client({ name: "forget-log-test", version: "1" }, { capabilities: {} });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(a), client.connect(b)]);
+    try {
+      const saved = await client.callTool({
+        name: "save_memory",
+        arguments: {
+          text: "jam's ThinkBook savings are at 7/10",
+          type: "project",
+          subject: "thinkbook-savings",
+          source: "user-explicit",
+        },
+      });
+      const id = (saved.content as Array<{ text: string }>)[0].text.match(/\[id ([0-9a-f-]{36})\]/)![1];
+
+      await client.callTool({ name: "forget_memory", arguments: { id } });
+
+      const lines = await readLines(path);
+      assert.equal(lines.length, 2, "one line for the save, one for the delete");
+      assert.equal(lines[0].decision, "saved");
+      assert.equal(lines[1].decision, "forgotten");
+      // The reversal must be reconstructable on its own — same fields as the save.
+      assert.equal(lines[1].text, "jam's ThinkBook savings are at 7/10");
+      assert.equal(lines[1].type, "project");
+      assert.equal(lines[1].subject, "thinkbook-savings");
+      assert.equal(lines[1].source, "user-explicit");
+      assert.equal(lines[1].client, "forget-log-test");
+    } finally {
+      await client.close();
+      await server.close();
+      await cleanup();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("records the scope of a delete, so a reversal can be attributed (D-048)", async () => {
+    const { path, dir, config } = await tempLog();
+    const { store, cleanup } = await tempStore();
+    try {
+      const saved = await store.save({
+        text: "the middle voice is the hard part of Greek",
+        source: "user-explicit",
+        scope: "amir/greek",
+      });
+      const { forgetThroughGate } = await import("../src/gate/pipeline.js");
+      const res = await forgetThroughGate(store, saved.memory.id, "amir/greek", config);
+      assert.equal(res.ok, true);
+
+      const lines = await readLines(path);
+      assert.equal(lines.length, 1);
+      assert.equal(lines[0].decision, "forgotten");
+      assert.equal(lines[0].scope, "amir/greek");
+    } finally {
+      await cleanup();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT log a failed forget — an unknown id is a usage error, not a decision", async () => {
+    const { path, dir, config } = await tempLog();
+    const { store, cleanup } = await tempStore();
+    try {
+      const { forgetThroughGate } = await import("../src/gate/pipeline.js");
+      const missing = await forgetThroughGate(store, "00000000-0000-0000-0000-000000000000", undefined, config);
+      assert.equal(missing.ok, false);
+      await assert.rejects(() => fs.readFile(path, "utf8"), "nothing may be written");
+    } finally {
+      await cleanup();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a REST delete is logged identically to an MCP one", async () => {
+    const { path, dir, config } = await tempLog();
+    const { store, cleanup } = await tempStore();
+    const { startHttpServer } = await import("../src/http.js");
+    const running = await startHttpServer({ store, token: "t", port: 0, gateLog: config });
+    try {
+      const saved = await store.save({ text: "jam ships on Fridays", source: "user-explicit" });
+      const res = await fetch(
+        `http://${running.host}:${running.port}/v1/memory/${saved.memory.id}`,
+        { method: "DELETE", headers: { Authorization: "Bearer t" } },
+      );
+      assert.equal(res.status, 200);
+
+      const lines = await readLines(path);
+      assert.equal(lines.length, 1);
+      assert.equal(lines[0].decision, "forgotten");
+      assert.equal(lines[0].text, "jam ships on Fridays");
+    } finally {
+      await running.close();
+      await cleanup();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});

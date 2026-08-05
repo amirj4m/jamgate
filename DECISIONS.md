@@ -1241,3 +1241,35 @@ Two decisions, and deliberately not a third:
 **The general rule this encodes:** any mechanism that makes data unreachable without deleting
 it owes the user a way to enumerate what it has hidden. "Soft delete" with no listing is
 indistinguishable from data loss from every angle a user can actually look from.
+
+### D-056 — A training corpus that records only acceptances teaches the wrong thing
+
+D-025 established the gate log as a local, labelled record of every gate decision, existing
+specifically to train the thin classifier (D-004) on real usage instead of guesses. It logged
+`saved`, `duplicate`, `superseded`, `conflict`, `possible_duplicate` and `rejected`.
+
+It did not log `forget`. `appendGateLog` was called only from the save pipeline, so a deletion
+— the single strongest signal a user can give that a memory should not have been kept — left
+no trace at all.
+
+Two consequences, both real:
+
+1. **The corpus is biased toward keeping.** Every memory that got in is a positive example
+   forever, including the ones the user threw out an hour later. A classifier trained on that
+   file learns what passed the prefilter, not what was worth keeping.
+2. **The log cannot be reconciled with the store.** Auditing production, 24 of 66 write
+   decisions had no surviving record and the log offered no explanation for a single one. Each
+   had to be attributed by hand. An audit trail that cannot account for the difference between
+   what it recorded and what exists is not an audit trail.
+
+**Decision:** deletes go through `forgetThroughGate`, the mirror of `saveThroughGate`, used by
+both transports — one `forgotten` decision carrying the deleted record's own text, type,
+subject, source, scope and client. `FileStore.forget` now hands the deleted record back (an
+additive, optional field on `ForgetResult`) so the log entry needs no second read.
+
+Only a SUCCESSFUL delete is logged. A not-found or ambiguous id is a usage error about an
+identifier, not a decision about a memory — the same line D-037 and D-054 draw.
+
+**The general rule this encodes:** if a log exists to be learned from, it has to record the
+reversals, not just the commits. Any event that undoes a logged decision is itself a decision,
+and the more informative one — corrections are where the signal is.
