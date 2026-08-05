@@ -61,17 +61,26 @@ const CREDENTIAL_KEYWORDS =
   /\b(api[ _-]?key|secret[ _-]?key|access[ _-]?token|auth[ _-]?token|refresh[ _-]?token|client[ _-]?secret|private[ _-]?key|passphrase|password|passwd|pwd|credentials?|token|secret)\b/i;
 
 /**
- * A credential ASSIGNMENT: the keyword sits immediately against a separator, and the value
- * looks like a credential rather than a word.
+ * A credential ASSIGNMENT: the keyword sits against a separator, and the value looks like a
+ * credential rather than a word.
  *
  * The adjacency is load-bearing. "jam's password manager is 1Password" contains the keyword,
  * a copula and a mixed-case 9-character value — and is a perfectly good memory. It survives
  * because `password` is followed by `manager`, not by `:`/`=`/`is`. Requiring the separator
  * to touch the keyword is what separates "here IS my password" from "here is a fact ABOUT
  * passwords".
+ *
+ * The one gap that adjacency alone left open is a PREPOSITIONAL phrase naming what the
+ * credential is FOR (D-050): "the password **for jam's postgres database** is Hunter2-…"
+ * is the most natural way a human states a password, and the 0.10.0 stress test walked it
+ * straight through the gate while the adjacent spelling of the same fact was refused. So a
+ * bounded `for|to|of|on` phrase — and only such a phrase — may sit between the keyword and
+ * the separator. It is still the credential being described (the head noun stays
+ * "password"), whereas "password **manager** is …" attaches a different head noun and is
+ * correctly untouched, because "manager" is not a preposition.
  */
 const ASSIGNMENT =
-  /\b(password|passwd|pwd|passphrase|api[ _-]?key|secret[ _-]?key|access[ _-]?token|auth[ _-]?token|client[ _-]?secret)\b\s*(?::|=|==>|->|\bis\b|\bwas\b)\s*["'`]?(\S{6,})/i;
+  /\b(password|passwd|pwd|passphrase|api[ _-]?key|secret[ _-]?key|access[ _-]?token|auth[ _-]?token|client[ _-]?secret)\b(?:\s+(?:for|to|of|on)\b[^.;:!?]{0,60}?)?\s*(?::|=|==>|->|\bis\b|\bwas\b)\s*["'`]?(\S{6,})/i;
 
 /** Minimum length for the entropy rule. Below this a token is too short to be a modern
  *  credential and too likely to be an ordinary word or code identifier. */

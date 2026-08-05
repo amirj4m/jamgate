@@ -80,6 +80,33 @@ describe("secret detection (gate layer 1, D-042)", () => {
     it("rejects an api key stated with an equals sign", () => {
       assert.ok(detectSecret(`api_key = ${key("a8Xk39", "fJdlWmQp2ZnR")}`));
     });
+
+    // D-050. The 0.10.0 validation stress test stored this and refused the adjacent
+    // spelling of the SAME fact — a prepositional phrase naming what the credential is
+    // for is the most natural way a human states a password, and it walked straight in.
+    it("rejects a password stated with a prepositional phrase before the copula", () => {
+      const found = detectSecret("the password for jam's postgres database is Hunter2-Correct-Horse");
+      assert.ok(found);
+      assert.match(found.label, /password or key assignment/);
+    });
+
+    it("rejects a passphrase stated with a prepositional phrase", () => {
+      assert.ok(detectSecret("passphrase for the backup drive is correct-horse-battery-1"));
+    });
+
+    it("rejects an api key stated with a prepositional phrase", () => {
+      assert.ok(detectSecret(`the api key for the stripe account is ${key("abc123", "XYZdef456")}`));
+    });
+
+    it("refuses the prepositional and the adjacent spelling of one fact identically", () => {
+      // The gap this closes: the two sentences say the same thing, so the gate must not
+      // depend on which way round the caller phrased it.
+      const adjacent = detectSecret("jam's mysql password is Tr0ub4dor-And-Three");
+      const prepositional = detectSecret("the password for jam's mysql database is Tr0ub4dor-And-Three");
+      assert.ok(adjacent);
+      assert.ok(prepositional);
+      assert.equal(adjacent.label, prepositional.label);
+    });
   });
 
   describe("entropy plus context", () => {
@@ -125,8 +152,21 @@ describe("secret detection (gate layer 1, D-042)", () => {
 
     it("allows a fact ABOUT a password manager", () => {
       // The adjacency requirement is what saves this one: "password" is followed by
-      // "manager", not by a separator.
+      // "manager", not by a separator. Widening the rule to allow a prepositional phrase
+      // (D-050) deliberately does NOT reach this — "manager" is not a preposition.
       assert.equal(detectSecret("jam's password manager is 1Password on all his devices"), null);
+    });
+
+    it("allows a fact about WHERE a password lives, not what it is", () => {
+      // The prepositional widening (D-050) still leans on the value test: "printed" is one
+      // character class and under ten characters, so it reads as prose, not a credential.
+      assert.equal(detectSecret("the password for the wifi is printed on the router"), null);
+      assert.equal(detectSecret("my api key for openai is in the .env file"), null);
+    });
+
+    it("allows prose about password policy and flows", () => {
+      assert.equal(detectSecret("jam's password reset flow is broken in staging"), null);
+      assert.equal(detectSecret("the password policy is enforced by the identity provider"), null);
     });
 
     it("allows a fact about secret handling policy", () => {

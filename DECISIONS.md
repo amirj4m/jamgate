@@ -1012,3 +1012,35 @@ Decisions that fell out of it:
 
 REST is a generic feature of any remote Jamgate, the same as the MCP transport — not bespoke to
 one deployment.
+
+### D-050 — A credential is a credential whichever way round the sentence runs
+
+D-042 refuses a credential ASSIGNMENT by requiring the separator (`:`, `=`, `is`) to sit
+immediately against the keyword. That adjacency is what lets "jam's password manager is
+1Password" through — the head noun after `password` is `manager`, so the sentence is a fact
+ABOUT passwords, not a password.
+
+The 0.10.0 validation stress test found the gap the rule left open. These two sentences state
+the same fact:
+
+```
+jam's mysql password is Tr0ub4dor-And-Three          → refused
+the password for jam's mysql database is Tr0ub4dor-And-Three  → STORED
+```
+
+The second is the more natural English, and it walked into the shared memory verbatim — over
+the MCP tool and the REST endpoint alike (they share one gate, D-049, so they shared the
+hole). The entropy rule did not catch it either: the value scores 3.40 bits/char against a
+3.5 floor, a near miss that is luck, not design.
+
+**Decision:** the keyword may be separated from its separator by a bounded PREPOSITIONAL
+phrase (`for`/`to`/`of`/`on`), and by nothing else. "the password **for X** is …" still has
+`password` as its head noun; "password **manager** is …" does not, and `manager` is not a
+preposition, so the precision-first line D-042 drew is preserved rather than traded away.
+The value test is unchanged and still does the real work: "the password for the wifi is
+**printed** on the router" and "my api key for openai is **in** the .env file" stay clean,
+because their values read as prose, not as credentials.
+
+**The general rule this encodes:** a gate rule that keys on sentence SHAPE must be tested
+against the paraphrases of the same fact, not just the shape that prompted it. One phrasing
+refused and its synonym stored is not a gate — it is a coin flip the caller cannot see.
