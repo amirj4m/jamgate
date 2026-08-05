@@ -49,9 +49,9 @@ Current state of the project. Update this at the end of every work session.
   the new modules; MCP transport and OAuth flow untouched. Tests 390 → **413**; tsc strict +
   build clean. **NOT deployed to the droplet and NOT published to npm** — both gated on jam's
   explicit OK. (This entry originally pointed at "the deploy plan for a SEPARATE Mathos
-  instance below"; no such plan exists anywhere in the repo — see **Open items** for what can
-  and cannot be reconstructed, and the question that needs jam's answer.) Pushed to GitHub
-  master.
+  instance below". Mathos is a separate project of jam's, not part of Jamgate — see **Open
+  items** for what it is; the deploy plan itself was never written down and is still open.)
+  Pushed to GitHub master.
 - **0.7.4 — the D-037 mystery is solved: the claude.ai/Cowork client sends `content`, not
   `text` (2026-07-21; D-039).** Live evidence, not a guess: that is exactly why the handler saw
   empty text and answered the absurd "too short". `save_memory` now resolves its text from
@@ -204,16 +204,24 @@ Genuinely remaining, in the order they matter:
    extension for ChatGPT/Gemini is still unbuilt.
 
 ## Open items
-- **What is the "Mathos" instance?** MEMORY.md's 0.10.0 entry points at "the deploy plan for a
-  SEPARATE Mathos instance below / in the task report" — but there is no such plan below, and
-  `Mathos` appears exactly once in the entire repo and in no commit message or decision. The
-  plan lived in a task report outside the repo and never made it into DECISIONS.md.
-  **Reconstructable only as an inference:** scopes (D-048) and the REST API (D-049) were both
-  built for "an app backend that wants a memory per user/topic", and the README names a tutor
-  app as the motivating case — so Mathos is most likely a (Greek-learning?) tutor app that
-  would run as a second Jamgate instance consuming the REST API. That is a guess, not a record.
-  **Needs jam to confirm the actual plan before anything is deployed for it.** Until then,
-  treat 0.10.0's deploy as the existing memory.amirj4m.com instance only.
+- **Mathos — identity settled, deploy plan still unknown.** *(jam, 2026-08-05.)*
+
+  **What it is:** a **separate project of jam's, in its own repo — not part of Jamgate and not
+  a feature of this codebase.** A learning/tutor system built over roughly two calendar days at
+  the end of July 2026: TypeScript on Node 22, SQLite store, **FSRS concept-based generative
+  review with no stored questions**, a pending-approval tray, roles as data with proven
+  isolation, a constitution of 42 rules, a 31-case eval corpus, a multi-turn eval harness, a CI
+  gate, 285 tests green, decisions logged through D-060. Its interface is deliberately
+  undecided. Relative to Jamgate it would be a **second deployment consuming this REST API**
+  (D-049) — a client of the gate, never a change to it.
+
+  **What is still open:** the actual deploy plan for that separate Jamgate instance. The 0.10.0
+  entry above pointed at "the deploy plan for a SEPARATE Mathos instance below"; **that plan was
+  never written down anywhere** — not in this repo, not in any commit, not in DECISIONS.md — and
+  it is genuinely unknown, not merely mislaid. It **must be re-decided before anything is
+  deployed for Mathos.** Until then, 0.10.0's deploy means the existing memory.amirj4m.com
+  instance only. (Note it would hit the same path-scoped nginx gap as the main instance —
+  D-053.)
 - Exact threshold/scoring for the "worth keeping" criterion — tune with real data from the
   gate log, alongside item 1 above.
 
