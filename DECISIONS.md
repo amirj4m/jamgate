@@ -1113,3 +1113,39 @@ asked to retire.
 **The general rule this encodes:** when a value is a JOIN KEY, its spelling is part of the
 schema, not documentation. Exactly one document may define it, everything else cites that
 one, and the code normalizes at a single boundary so a caller's spelling cannot fork the data.
+
+### D-053 — A path-scoped reverse proxy is part of the release, not part of the server
+
+Jamgate binds to localhost and a reverse proxy is the only public door (D-029). Caddy's
+`reverse_proxy` forwards the whole host, so adding a surface to Jamgate makes it public
+automatically. **nginx does not.** It forwards only the paths named in a `location` block, so
+every new surface needs a matching block, and a missing one fails in the worst way available:
+nginx answers its own 404 and the request never reaches Jamgate at all.
+
+Verified against a live path-scoped deployment while validating 0.10.0:
+
+```
+GET /healthz     → 200  {"status":"ok",…}          (proxied)
+GET /mcp         → 401  from Jamgate               (proxied)
+GET /v1/memory   → 404  text/html, Server: nginx   (NOT proxied — the REST API is unreachable)
+```
+
+The REST API (D-049) shipped in 0.10.0 and works perfectly in-process; on that host it is
+simply not routed. A REST client cannot tell "this server has no REST API" from "your proxy
+does not forward it", because it never gets to talk to the server that would say so.
+
+**Decision:** the required `location` blocks — `/mcp`, `/v1/`, the OAuth paths, `/healthz` —
+are documented in the README's remote-mode section as part of the deploy, together with the
+one-line check that distinguishes the two failures:
+
+```bash
+curl -si https://your-domain/v1/memory | head -1   # 401 = reaching Jamgate; 404 = proxy gap
+```
+
+The alternative — making the server detect it is behind a partial proxy — is not available:
+a request that never arrives cannot be observed. So it belongs in the deploy checklist.
+
+**The general rule this encodes:** when a component's public surface is enumerated somewhere
+OUTSIDE the component, adding to that surface is a two-place change, and the second place must
+be written down where the deploy happens. Shipping a feature is not the same as exposing it,
+and the gap between them is invisible from the inside.

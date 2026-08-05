@@ -611,7 +611,10 @@ memory.example.com {
 }
 ```
 
-**nginx** — equivalent, with TLS certs managed by certbot:
+**nginx** — equivalent, with TLS certs managed by certbot. Note that nginx, unlike Caddy's
+`reverse_proxy`, forwards **only the paths you name**: every Jamgate surface needs its own
+`location`, and one you forget returns nginx's own 404 without the request ever reaching
+Jamgate.
 
 ```nginx
 server {
@@ -628,7 +631,34 @@ server {
         proxy_buffering    off;                  # don't buffer the event stream
         proxy_read_timeout 3600s;
     }
+
+    # REST API (0.10.0). REQUIRED if you use it — without this block `/v1/memory` is a
+    # 404 from nginx, not a 401 from Jamgate, and every REST client silently sees "no
+    # such endpoint" instead of "you need a token".
+    location /v1/ {
+        proxy_pass         http://127.0.0.1:8420;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   Authorization $http_authorization;
+    }
+
+    # MCP OAuth (needed for claude.ai and the Claude mobile app).
+    location /.well-known/ { proxy_pass http://127.0.0.1:8420; }
+    location /authorize    { proxy_pass http://127.0.0.1:8420; }
+    location /token        { proxy_pass http://127.0.0.1:8420; }
+    location /register     { proxy_pass http://127.0.0.1:8420; }
+
+    # Liveness probe (unauthenticated by design; exposes only status + version).
+    location /healthz { proxy_pass http://127.0.0.1:8420/healthz; }
 }
+```
+
+**Verify each surface actually reaches Jamgate** after any proxy change — an unauthenticated
+request must come back `401` from Jamgate, never `404` from the proxy:
+
+```bash
+curl -si https://memory.example.com/v1/memory | head -1   # expect: HTTP/2 401
+curl -s  https://memory.example.com/healthz               # expect: {"status":"ok","version":"…"}
 ```
 
 ### Connect your agents
@@ -733,10 +763,13 @@ be local, free, and one command to install.
   model all run on your machine. Jamgate makes **no network calls** and talks to no cloud
   AI.
 - **The decision log is local too.** Every gate decision (saved / duplicate / superseded /
-  conflict / possible_duplicate / rejected, with its reason) is appended to
-  `~/.jamgate/gate.log`, a strictly local, size-capped JSONL file that rotates
-  automatically and **never leaves your machine**. It exists to collect real usage data
-  for a future local quality classifier. Disable it with `JAMGATE_GATE_LOG=off`.
+  conflict / possible_duplicate / rejected, with its reason) is appended to a strictly
+  local, size-capped JSONL file that rotates automatically and **never leaves your
+  machine**. It exists to collect real usage data for a future local quality classifier.
+  It lives **next to the store**: `gate.log` in the same directory as `JAMGATE_STORE` when
+  that is set, otherwise `~/.jamgate/gate.log`. `JAMGATE_GATE_LOG` overrides the path
+  outright, and `JAMGATE_GATE_LOG=off` disables logging. (Following the store is what makes
+  the log writable under a hardened systemd unit with `ProtectHome=true` — see D-037.)
 - **Nothing leaves the machine** — no telemetry, no accounts, no keys.
 
 ## Status
