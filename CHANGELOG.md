@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+*Found by auditing the REAL gate decision logs and production store before release — not by the
+test suite, which sent only well-formed values and never looked at what the store became.*
+
+- **The memory `type` and `source` enums are now enforced in code** (D-054). The enum in the
+  tool's `inputSchema` is a hint to the model, not a server-side check, so any string reached
+  the store — and because an unrecognized type falls through `computeExpiresAt` as "never
+  expires", a typo silently promoted a 2-day memory to a permanent one. The real production
+  store held `type: "profile"`. An unknown value is now an argument error (tool `isError`,
+  REST `400`), never a gate verdict, on both transports.
+- **A human-sourced memory can no longer go dark silently** (D-055). A `user-explicit` /
+  `user-confirmed` save that lands a lifespan of a week or less now returns the expiry date and
+  how to make it durable. The save still happens exactly as asked — the TTL was right, the
+  silence was the bug. Measured cost of that silence: 44% of the real production store (17 of
+  39 active records) was expired and invisible to recall, twelve of them explicitly asked for
+  by a human.
+- **Deletes are recorded in the gate log** (D-056). `forget` wrote nothing, so the D-025
+  training corpus held every acceptance and no reversal, and could not be reconciled with the
+  store at all — 24 production log-writes had no surviving record and the log explained none of
+  them. `forget_memory` and `DELETE /v1/memory/:id` now emit a `forgotten` decision carrying
+  the deleted record's own metadata.
+
+### Added
+
+- **Expired memories are discoverable** (D-055). `jamgate expired [--scope <name>] [--json]`
+  lists records that have aged out of recall but are still on disk, with the date compaction
+  may delete each one. `recall_memory` appends the hidden count — including on an empty result,
+  where "nothing is stored" and "everything aged out" otherwise look identical — and
+  `GET /v1/memory?expired=1` returns the same list, with `expiredHidden` on ordinary recalls.
+  `MemoryStore.listExpired` is an optional adapter capability, so a backend without TTL is
+  unaffected.
+
 ## [0.10.0] - 2026-07-23
 
 ### Added

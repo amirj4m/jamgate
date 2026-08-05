@@ -3,6 +3,64 @@
 Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
+
+> ### ⚠ READ FIRST — the memory is split across TWO live stores (2026-08-05)
+>
+> | | production | this laptop |
+> |---|---|---|
+> | path | `142.93.102.10:/var/lib/jamgate/memory.json` (`memory.amirj4m.com`, jamgate **0.9.2**) | `~/.jamgate/memory.json` (local stdio) |
+> | records | **43** (39 active, 29 recallable) | **11** (8 active) |
+> | last write | **2026-07-27T18:28Z — frozen for 9 days** | **2026-08-05**, still being written today |
+> | writers | `claude-code`, `Anthropic/ClaudeAI` | `local-agent-mode-jamgate` |
+>
+> The stored note "Memory unified on remote — local stdio mode retired on this laptop
+> (2026-07-21)" is **contradicted by the gate log**: 12 organic saves landed on the laptop
+> between 2026-07-27 and today, and production has received nothing in that time. Whatever the
+> intent was, jam's memory is fragmented right now — which is exactly the failure D-047 exists
+> to prevent, arrived at by a different route.
+>
+> **Not merged, deliberately.** Which set of memories is wanted, and in which direction, is
+> jam's decision, not a cleanup an agent should perform. `jamgate export` / `import` is the
+> tool when he decides (import replays through the gate, D-033).
+
+- **DOGFOODING AUDIT of the real gate logs — the release gate that 0.10.0 did NOT clear
+  (2026-08-05; D-054…D-056).** Read both real decision logs: production
+  (`/var/lib/jamgate/gate.log`, 76 lines, 2026-07-21 → 2026-07-27, pulled read-only over SSH)
+  and local (`~/.jamgate/gate.log`, 19 lines, 2026-07-21 → 2026-08-05). ~50 organic saves by
+  one user over ~13 days.
+  - **The verdicts were right; the outcomes were not.** 49/49 post-0.8.0 production decisions
+    defensible. **Zero false refusals. Zero junk stored. Zero credentials in any live store.
+    Zero live duplicates** (pairwise cosine over all 38 embedded active records: nothing at or
+    above the 0.88 bar). **Zero subject collisions.**
+  - **THE EVIDENCE DOES NOT COVER 0.10.0.** All 76 production lines are scope `default` —
+    **namespaces have zero organic use**. **REST has zero organic use.** What was audited is
+    evidence for 0.8.0/0.9.x. *No future release may claim 0.10.0 is dogfood-proven on this
+    data.* Also: all four production rejections came from one minute of verification probes,
+    so the refusal path has **never fired on real user input** either.
+  - **Fixed — the type enum was never enforced (D-054).** Production held `type: "profile"`;
+    an unknown type falls through `computeExpiresAt` as "never expires", so a typo silently
+    made a 2-day memory permanent. Caught only by auditing real data — every synthetic test
+    sent valid types.
+  - **Fixed — 44% of production was expired and invisible (D-055).** 17 of 39 active records,
+    all `type: state`, twelve `user-explicit`. Now: a human-sourced save with a short TTL
+    warns the caller, and expiry is discoverable (`jamgate expired`, a recall footer,
+    `GET /v1/memory?expired=1`).
+  - **Fixed — deletes were never logged (D-056).** The D-025 corpus recorded every acceptance
+    and no reversal; 24 production log-writes had no surviving record and the log explained
+    none of them.
+  - **Data repaired on the live production store** (backup `~/backups/jamgate-droplet-2026-08-05`,
+    SHA-256 verified). `1ba22b6e` (profile+finance master record) carried the auto-derived
+    subject `email` — any future `email` memory would have retired it; now
+    `profile-master-record`. Seven expired records re-typed to a durable type. **Expired
+    dropped 17 → 10; recallable 22 → 29.** Ten remain expired pending jam's decision (see
+    Open items). No memory text was altered; ids, count and schemaVersion unchanged.
+  - **Documented, not blocking:** the D-040 auto-subject collapsed four real memories onto a
+    bogus shared subject `location` back on 2026-07-21 (chain `a74458fb → c191336c → e367f5e0
+    → 715d9c67`, the survivor later deleted) — the cause is fixed, the damaged records were
+    never repaired, and the facts survive only via `1ba22b6e`. The near-duplicate refusal also
+    caused real churn on the Sajjad-loan finance record (written 3×, deleted 2×, 09:26–09:30
+    on 2026-07-27). One invalid type remains on a superseded record (`a74458fb`), left as
+    history rather than rewritten.
 - **0.10.0 VALIDATED against real clients; six bugs found, six fixed (2026-08-05; D-050…D-053).**
   RULES §9 run end-to-end against a **real MCP agent** (Claude Code 2.1.217, over stdio and over
   Streamable HTTP) plus the official MCP SDK client and `curl` — not just unit tests. Junk
@@ -204,6 +262,27 @@ Genuinely remaining, in the order they matter:
    extension for ChatGPT/Gemini is still unbuilt.
 
 ## Open items
+- **Ten expired production records need jam to rule on their type** *(2026-08-05, deadline
+  2026-08-23 when compaction may delete them).* All ten are historical finance/admin records
+  where no durable type is obviously right, so they were deliberately NOT guessed. Each needs a
+  one-line answer — keep (and as what type) or let it go:
+
+  | id | what it is | recommendation |
+  |---|---|---|
+  | `4b101b77` | eFood pay structure (70/30 split, twice-monthly) — how he is paid | **identity** — a standing arrangement, still current |
+  | `e4d6453d` | Eurobank card lost Jun 2026 + fraud charges; **contains the IBAN** | **identity** — the IBAN is permanent; the incident is closed |
+  | `d0a16edf` | Sajjad loan fully settled 26 Jul, €260, receivable now €0 | **project** — recent and referenced by later finance notes |
+  | `bdb9abaf` | May 2026 financial summary (income/expenses) | **project** — bookkeeping, still in the current year |
+  | `19a89fb3` | Payment reconciliations May–Jun 2026 | **project** — same |
+  | `e0f4af00` | eFood gross income by period, Feb–Jun 2026 | **project** — same |
+  | `87365bb9` | Subscriptions mid-2026 — self-labelled "several cancelled by 24 Jul" | **forget** — it says itself it is stale |
+  | `3131b0c2` | Daily cash expenses May–Jun — self-labelled "granular, low-value historical" | **forget** — it says itself it is low value |
+  | `204d92db` | Laptop bottom-cover purchase receipt, May 2026 | **forget** — a one-off receipt, belongs in the accounting repo |
+  | `bfcc38de` | FORMER residence (Aristotelous 85) building management, "kept in case old-address paperwork" | **identity** if the paperwork is still open, else forget |
+
+  To keep one: re-save it with the durable type (its text is intact in the store and in
+  `~/backups/jamgate-droplet-2026-08-05/memory.json`). To let one go, do nothing — compaction
+  removes it after 2026-08-23.
 - **Mathos — identity settled, deploy plan still unknown.** *(jam, 2026-08-05.)*
 
   **What it is:** a **separate project of jam's, in its own repo — not part of Jamgate and not
