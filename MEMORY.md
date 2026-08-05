@@ -19,8 +19,10 @@ Current state of the project. Update this at the end of every work session.
   is refused exactly as the tool refuses it. `src/store/scope.ts` + `src/gate/pipeline.ts` are
   the new modules; MCP transport and OAuth flow untouched. Tests 390 → **413**; tsc strict +
   build clean. **NOT deployed to the droplet and NOT published to npm** — both gated on jam's
-  explicit OK (see the deploy plan for a SEPARATE Mathos instance below / in the task report).
-  Pushed to GitHub master.
+  explicit OK. (This entry originally pointed at "the deploy plan for a SEPARATE Mathos
+  instance below"; no such plan exists anywhere in the repo — see **Open items** for what can
+  and cannot be reconstructed, and the question that needs jam's answer.) Pushed to GitHub
+  master.
 - **0.7.4 — the D-037 mystery is solved: the claude.ai/Cowork client sends `content`, not
   `text` (2026-07-21; D-039).** Live evidence, not a guess: that is exactly why the handler saw
   empty text and answered the absurd "too short". `save_memory` now resolves its text from
@@ -151,17 +153,40 @@ Current state of the project. Update this at the end of every work session.
 - AGENTS.md is canonical; symlink CLAUDE.md / GEMINI.md to it on Linux.
 
 ## What's next
-Steps 1–4 of the original build plan are done (name chosen, repo scaffolded, MCP server
-standing, verified against a real agent). Remaining:
-1. Finish the gate layers: expiry/TTL → thin classifier for ambiguous cases.
-   (dedup, supersession, and the trust-based conflict guard are done.)
-2. Derive `subject` automatically instead of relying on the calling agent to pass it.
-3. Atomic writes for the file store.
-4. Multi-device sync (D-018).
+*(Rewritten 2026-08-05. This list had gone seven phases stale — it still named TTL, atomic
+writes and auto-subject as pending, all of which shipped in Phase 2/3.)*
+
+Shipped and no longer open: the full gate pipeline (prefilter, dedup, time-aware supersession,
+trust conflict guard, semantic near-duplicate), TTL/expiry + compaction (D-021), atomic durable
+writes (D-020), automatic `subject` derivation (D-027, D-040, D-052), optional local embeddings
+(D-026), remote HTTP mode + MCP OAuth (D-029, D-034), one-click install and deploy templates
+(D-030, D-031), export/import and vendor import (D-033, D-035), namespaces and the REST API
+(D-048, D-049).
+
+Genuinely remaining, in the order they matter:
+1. **The thin classifier for ambiguous saves** (RULES §5.3, D-004) — the last unbuilt layer of
+   the hybrid pipeline. The gate log (D-025) has been collecting labelled decisions for exactly
+   this since Phase 3; nothing consumes it yet.
+2. **Multi-device sync (D-018)** — remote mode (D-029) covers the "one instance, many clients"
+   case, so this is now specifically about two stores that both take writes offline.
+3. **Embedding-quality tuning** — the thresholds in `src/embeddings/vector.ts` are measured
+   (D-044, D-045) but the 0.76–0.83 false-negative band is a known, accepted cost.
+4. **Non-MCP surfaces (RULES §7 phase 2)** — the REST API (D-049) is the first step; a browser
+   extension for ChatGPT/Gemini is still unbuilt.
 
 ## Open items
-- Embedding model choice (local vs API) for dedup/recall — decide at step 5.
-- Exact threshold/scoring for the "worth keeping" criterion — tune with real data.
+- **What is the "Mathos" instance?** MEMORY.md's 0.10.0 entry points at "the deploy plan for a
+  SEPARATE Mathos instance below / in the task report" — but there is no such plan below, and
+  `Mathos` appears exactly once in the entire repo and in no commit message or decision. The
+  plan lived in a task report outside the repo and never made it into DECISIONS.md.
+  **Reconstructable only as an inference:** scopes (D-048) and the REST API (D-049) were both
+  built for "an app backend that wants a memory per user/topic", and the README names a tutor
+  app as the motivating case — so Mathos is most likely a (Greek-learning?) tutor app that
+  would run as a second Jamgate instance consuming the REST API. That is a guess, not a record.
+  **Needs jam to confirm the actual plan before anything is deployed for it.** Until then,
+  treat 0.10.0's deploy as the existing memory.amirj4m.com instance only.
+- Exact threshold/scoring for the "worth keeping" criterion — tune with real data from the
+  gate log, alongside item 1 above.
 
 ## Migration note (Windows → Linux)
 These files are plain text. The portability mechanism is **git**: commit them, push,
@@ -307,13 +332,20 @@ and this session is non-interactive so they're handed off. Master + tag CI both 
   package `jamgate`, stdio) + `mcpName` in package.json. Registry is now the source of
   truth (feeds PulseMCP crawl; the modelcontextprotocol/servers README community list is
   RETIRED). server.json is NOT in the npm tarball (kept out of `files`).
-- **PENDING (auth-gated, handed off to the user):**
-  - `npm login && npm publish` — not authenticated here (`npm whoami` → ENEEDAUTH).
-  - MCP Registry publish — needs interactive `mcp-publisher login github` (device OAuth).
-  - mcpservers.org — web form at https://mcpservers.org/submit (Category: Memory), NOT a PR.
-  - PulseMCP — auto-crawls the registry/npm; claim the listing once it appears.
-  - Auto-publish CI workflow — SKIPPED on purpose: no `NPM_TOKEN` repo secret exists
-    (`gh secret list` empty); did not create a workflow that would fail on every tag.
+- **PENDING at the time (auth-gated, handed off to the user) — status as of 2026-08-05:**
+  - ✅ `npm publish` — **done, and repeatedly since.** `npm view jamgate version` → **0.9.2**;
+    published versions run through 0.1.0 … 0.9.2. (0.10.0 is built and tagged-pending, not yet
+    published — that step is still awaiting jam's explicit OK.)
+  - ✅ Auto-publish CI workflow — **exists and has run.** `.github/workflows/publish.yml`
+    publishes on a `v*` tag with `npm publish --provenance --access public` using the
+    `NPM_TOKEN` secret. The "SKIPPED on purpose, no secret exists" note below was true in
+    Phase 4 and has been false since the secret was added.
+  - ◻ MCP Registry publish — still needs interactive `mcp-publisher login github` (device
+    OAuth). The `mcp-publisher` binary sits untracked in the repo root (now gitignored);
+    `server.json` was nine releases stale at 0.1.0 until 2026-08-05 and is now version-locked
+    to package.json by a test.
+  - ◻ mcpservers.org — web form at https://mcpservers.org/submit (Category: Memory), NOT a PR.
+  - ◻ PulseMCP — auto-crawls the registry/npm; claim the listing once it appears.
 - **Still open (post-4):** thin classifier; embedding-quality tuning; multi-device sync
   (D-018); HTTP/remote transport.
 
