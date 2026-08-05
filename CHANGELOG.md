@@ -7,46 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-05
+
 ### Fixed
 
-*Found by auditing the REAL gate decision logs and production store before release — not by the
-test suite, which sent only well-formed values and never looked at what the store became.*
-
-- **The memory `type` and `source` enums are now enforced in code** (D-054). The enum in the
-  tool's `inputSchema` is a hint to the model, not a server-side check, so any string reached
-  the store — and because an unrecognized type falls through `computeExpiresAt` as "never
-  expires", a typo silently promoted a 2-day memory to a permanent one. The real production
-  store held `type: "profile"`. An unknown value is now an argument error (tool `isError`,
-  REST `400`), never a gate verdict, on both transports.
-- **A human-sourced memory can no longer go dark silently** (D-055). A `user-explicit` /
-  `user-confirmed` save that lands a lifespan of a week or less now returns the expiry date and
-  how to make it durable. The save still happens exactly as asked — the TTL was right, the
-  silence was the bug. Measured cost of that silence: 44% of the real production store (17 of
-  39 active records) was expired and invisible to recall, twelve of them explicitly asked for
-  by a human.
-- **An expired memory can be replaced but no longer blocks a save** (D-057). Soft-expired
-  records keep `status: "active"`, so the duplicate and near-duplicate checks counted them as
-  live and answered `duplicate` to the very save that would have restored the fact — while
-  recall reported nothing stored. A fact could go dark and become permanently un-restorable
-  *because* it had gone dark. Live records still dedup exactly as before; supersession still
-  sees expired records, which is what turns a re-save into a revival.
-- **Deletes are recorded in the gate log** (D-056). `forget` wrote nothing, so the D-025
-  training corpus held every acceptance and no reversal, and could not be reconciled with the
-  store at all — 24 production log-writes had no surviving record and the log explained none of
-  them. `forget_memory` and `DELETE /v1/memory/:id` now emit a `forgotten` decision carrying
-  the deleted record's own metadata.
+- **`jamgate import` decisions now reach the gate decision log** (D-061). An import replays
+  every record through the same gate a live save uses (D-033), but it does not travel through
+  the shared save pipeline, which is where the log append lives — so a bulk import made real
+  verdicts and recorded none of them. Found while merging one store into another: nine records
+  were imported and the log did not move at all. Same corpus bias D-056 fixed for deletes. A
+  dry run still logs nothing, because a preview decides nothing.
 
 ### Added
 
-- **Expired memories are discoverable** (D-055). `jamgate expired [--scope <name>] [--json]`
-  lists records that have aged out of recall but are still on disk, with the date compaction
-  may delete each one. `recall_memory` appends the hidden count — including on an empty result,
-  where "nothing is stored" and "everything aged out" otherwise look identical — and
-  `GET /v1/memory?expired=1` returns the same list, with `expiredHidden` on ordinary recalls.
-  `MemoryStore.listExpired` is an optional adapter capability, so a backend without TTL is
-  unaffected.
+- **The MCP registry is published automatically on release.** The release workflow now
+  authenticates with `mcp-publisher login github-oidc`, which needs no secret and no human —
+  the interactive `login github` device flow is why the registry publish was left manual after
+  Phase 4 and the registry entry went nine releases stale.
 
-## [0.10.0] - 2026-07-23
+### Documentation
+
+- **New golden rule: documentation never lags the work, and every change ships** (D-060), in
+  `RULES.md` §8 and `AGENTS.md`. A change is finished when it is committed, its docs and
+  changelog updated in the same session, versions bumped in lockstep, tagged, published and
+  released — not when it compiles. 0.10.0 sat untagged on `master` for thirteen days while its
+  own README pointed every new Claude Desktop user at a `.mcpb` bundle from v0.5.0.
+- Every tagged version from v0.6.0 to v0.9.2 now has a GitHub Release. Releases had been
+  missing since v0.5.0, so `/releases/latest` served a five-versions-stale bundle.
+
+## [0.10.0] - 2026-08-05
+
 
 ### Added
 
@@ -126,6 +116,43 @@ below was ever visible outside the repo.*
   beside `JAMGATE_STORE`) since D-037, not always at `~/.jamgate/gate.log`.
 - The `memory-discipline` skill gained the `scope` guidance it never had, and `DECISIONS.md`
   now records why D-028 and D-032 are unused numbers.
+
+### Fixed — found by auditing the real gate log before release
+
+### Fixed
+*Found by auditing the REAL gate decision logs and production store before release — not by the
+test suite, which sent only well-formed values and never looked at what the store became.*
+- **The memory `type` and `source` enums are now enforced in code** (D-054). The enum in the
+  tool's `inputSchema` is a hint to the model, not a server-side check, so any string reached
+  the store — and because an unrecognized type falls through `computeExpiresAt` as "never
+  expires", a typo silently promoted a 2-day memory to a permanent one. The real production
+  store held `type: "profile"`. An unknown value is now an argument error (tool `isError`,
+  REST `400`), never a gate verdict, on both transports.
+- **A human-sourced memory can no longer go dark silently** (D-055). A `user-explicit` /
+  `user-confirmed` save that lands a lifespan of a week or less now returns the expiry date and
+  how to make it durable. The save still happens exactly as asked — the TTL was right, the
+  silence was the bug. Measured cost of that silence: 44% of the real production store (17 of
+  39 active records) was expired and invisible to recall, twelve of them explicitly asked for
+  by a human.
+- **An expired memory can be replaced but no longer blocks a save** (D-057). Soft-expired
+  records keep `status: "active"`, so the duplicate and near-duplicate checks counted them as
+  live and answered `duplicate` to the very save that would have restored the fact — while
+  recall reported nothing stored. A fact could go dark and become permanently un-restorable
+  *because* it had gone dark. Live records still dedup exactly as before; supersession still
+  sees expired records, which is what turns a re-save into a revival.
+- **Deletes are recorded in the gate log** (D-056). `forget` wrote nothing, so the D-025
+  training corpus held every acceptance and no reversal, and could not be reconciled with the
+  store at all — 24 production log-writes had no surviving record and the log explained none of
+  them. `forget_memory` and `DELETE /v1/memory/:id` now emit a `forgotten` decision carrying
+  the deleted record's own metadata.
+### Added
+- **Expired memories are discoverable** (D-055). `jamgate expired [--scope <name>] [--json]`
+  lists records that have aged out of recall but are still on disk, with the date compaction
+  may delete each one. `recall_memory` appends the hidden count — including on an empty result,
+  where "nothing is stored" and "everything aged out" otherwise look identical — and
+  `GET /v1/memory?expired=1` returns the same list, with `expiredHidden` on ordinary recalls.
+  `MemoryStore.listExpired` is an optional adapter capability, so a backend without TTL is
+  unaffected.
 
 ## [0.9.2] - 2026-07-22
 
@@ -696,7 +723,8 @@ single shared memory clean at write time instead of letting it bloat with junk.
 - Verified end-to-end over the MCP protocol and covered by an automated test suite
   (89 tests) running on Node 20.x and 22.x in CI.
 
-[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/amirj4m/jamgate/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/amirj4m/jamgate/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/amirj4m/jamgate/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/amirj4m/jamgate/compare/v0.9.0...v0.9.1

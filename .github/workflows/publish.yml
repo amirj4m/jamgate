@@ -29,3 +29,16 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # The MCP registry is how MCP-aware clients and directories (PulseMCP and others crawl
+      # it) discover the server, and `server.json` carries the version they will install. It
+      # was left manual after Phase 4 because `mcp-publisher login github` is an interactive
+      # device flow — so it never happened, and the registry entry went nine releases stale.
+      # `login github-oidc` needs no secret and no human: it exchanges this workflow's OIDC
+      # token, which is why `id-token: write` is already requested above.
+      - name: Publish to the MCP registry
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" \
+            | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

@@ -1341,3 +1341,30 @@ skill lying about subjects cost the maintainer contradictory memories about wher
 **The general rule this encodes:** shipping is part of the change, not a separate later
 activity. A patch release is cheap; an unshipped `master` and a doc that contradicts the code
 are not — and both get more expensive the longer they sit.
+
+### D-061 — A bulk import makes real gate decisions, so it must leave real log lines
+
+D-033 established that `import` replays every record through the same quality gate a live save
+uses — it never blind-appends. That is true, and it is the whole reason import is safe. But
+`importBatch` calls the gate directly under one lock for the whole batch, and the gate-log
+append lives in `saveThroughGate`, which import does not travel through. So an import made
+genuine verdicts — created, superseded, duplicate, conflict, near-duplicate — and recorded not
+one of them.
+
+Found while merging a laptop store onto a server: nine records were imported, the report
+printed `imported: 9 (9 new)`, and the decision log did not move a single line.
+
+This is D-056's problem again from the other direction. That entry fixed deletes so the
+corpus would carry reversals; this one fixes bulk writes so the corpus carries the decisions
+that *created* a large part of the store. A classifier trained on a log that is missing every
+migrated record learns from a biased sample of how memories actually arrive — and migration is
+exactly how a store gets its history.
+
+**Decision:** `importCommand` appends one gate-log entry per outcome, tagged
+`reason: "imported"` so a bulk write is distinguishable from an interactive one when the
+corpus is later analysed. A `--dry-run` logs nothing: a preview decides nothing.
+
+**The general rule this encodes:** when a code path is factored out to be reused, audit what
+was left behind at the old call site. Import reused the gate — the valuable part — and
+silently dropped the observability that had been wrapped around it. Reuse moves the logic,
+not the cross-cutting concerns that surrounded it.

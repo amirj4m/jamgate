@@ -17,6 +17,7 @@ import { CURRENT_SCHEMA_VERSION } from "../store/schema.js";
 import { resolveDupThreshold } from "../embeddings/embedder.js";
 import type { Memory, SaveResult } from "../store/types.js";
 import { VERSION } from "../version.js";
+import { appendGateLog, resolveGateLogConfig } from "../gate/log.js";
 import { ImportValidationError, parseImportFile } from "./parse.js";
 import {
   isVendor,
@@ -218,8 +219,35 @@ export async function importCommand(
 
   const store = deps.store ?? backupStore(env);
   const report = await store.importBatch(records, { dryRun: parsed.dryRun });
+  // Import decisions belong in the decision log like every other gate decision (D-061).
+  // `importBatch` replays each record through the SAME gate a live save uses (D-033) — it
+  // simply does not travel through `saveThroughGate`, which is where the logging lives, so
+  // until now a bulk import made real verdicts and recorded none of them.
+  if (!report.dryRun) await logImportOutcomes(report.outcomes);
   out(formatImportReport(report, { file, total: records.length, notes: vendorNotes }));
   return 0;
+}
+
+/** Append one gate-log line per import outcome (D-061). Best-effort and non-throwing, like
+ *  every other call site: a logging failure must never fail an import that succeeded. A dry
+ *  run logs nothing, because nothing was decided — it was a preview. */
+async function logImportOutcomes(outcomes: SaveResult[]): Promise<void> {
+  const config = resolveGateLogConfig();
+  for (const o of outcomes) {
+    await appendGateLog(
+      {
+        decision: o.action === "created" ? "saved" : o.action,
+        reason: "imported",
+        type: o.memory.type,
+        subject: o.memory.subject,
+        source: o.memory.source,
+        scope: o.memory.scope,
+        client: o.memory.client?.name,
+        text: o.memory.text,
+      },
+      config,
+    );
+  }
 }
 
 /** Lines describing what a vendor export actually gave us — which files were read, and which

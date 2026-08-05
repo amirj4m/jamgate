@@ -310,3 +310,98 @@ describe("jamgate import (through the gate)", () => {
     }
   });
 });
+
+/**
+ * D-061. `importBatch` replays every record through the same gate a live save uses (D-033),
+ * but it does not travel through `saveThroughGate`, which is where the gate-log append lives.
+ * So a bulk import made real verdicts and recorded none of them — found while merging a
+ * laptop store onto a server: nine records were imported and the log did not move at all.
+ * That is the same corpus-bias problem D-056 fixed for deletes.
+ */
+describe("import decisions reach the gate log (D-061)", () => {
+  it("logs one decision per imported record", async () => {
+    const { store, cleanup } = await tempStore();
+    const dir = await fs.mkdtemp(join(tmpdir(), "jamgate-importlog-"));
+    const logPath = join(dir, "gate.log");
+    const file = join(dir, "export.json");
+    const prevLog = process.env.JAMGATE_GATE_LOG;
+    const prevStore = process.env.JAMGATE_STORE;
+    process.env.JAMGATE_GATE_LOG = logPath;
+    process.env.JAMGATE_STORE = store.storePath;
+    try {
+      await fs.writeFile(
+        file,
+        JSON.stringify({
+          schemaVersion: 3,
+          memories: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              text: "jam runs a personal accounting project in Markdown",
+              type: "project",
+              subject: "accountant",
+              scope: "default",
+              source: "user-explicit",
+              status: "active",
+              createdAt: "2026-07-31T06:37:00.000Z",
+              updatedAt: "2026-07-31T06:37:00.000Z",
+            },
+          ],
+        }),
+        "utf8",
+      );
+
+      assert.equal(await importCommand([file]), 0);
+
+      const lines = (await fs.readFile(logPath, "utf8")).trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      assert.equal(lines.length, 1, "one imported record must produce one decision line");
+      assert.equal(lines[0].decision, "saved");
+      assert.equal(lines[0].reason, "imported");
+      assert.equal(lines[0].subject, "accountant");
+      assert.match(lines[0].text, /accounting project/);
+    } finally {
+      if (prevLog === undefined) delete process.env.JAMGATE_GATE_LOG; else process.env.JAMGATE_GATE_LOG = prevLog;
+      if (prevStore === undefined) delete process.env.JAMGATE_STORE; else process.env.JAMGATE_STORE = prevStore;
+      await fs.rm(dir, { recursive: true, force: true });
+      await cleanup();
+    }
+  });
+
+  it("a dry run decides nothing and therefore logs nothing", async () => {
+    const { store, cleanup } = await tempStore();
+    const dir = await fs.mkdtemp(join(tmpdir(), "jamgate-importlog-dry-"));
+    const logPath = join(dir, "gate.log");
+    const file = join(dir, "export.json");
+    const prevLog = process.env.JAMGATE_GATE_LOG;
+    const prevStore = process.env.JAMGATE_STORE;
+    process.env.JAMGATE_GATE_LOG = logPath;
+    process.env.JAMGATE_STORE = store.storePath;
+    try {
+      await fs.writeFile(
+        file,
+        JSON.stringify({
+          schemaVersion: 3,
+          memories: [
+            {
+              id: "22222222-2222-4222-8222-222222222222",
+              text: "jam is studying Linux for the LPIC-1 certification",
+              type: "project",
+              scope: "default",
+              source: "user-explicit",
+              status: "active",
+              createdAt: "2026-07-30T10:53:00.000Z",
+              updatedAt: "2026-07-30T10:53:00.000Z",
+            },
+          ],
+        }),
+        "utf8",
+      );
+      assert.equal(await importCommand([file, "--dry-run"]), 0);
+      await assert.rejects(() => fs.readFile(logPath, "utf8"), "a preview must write no log");
+    } finally {
+      if (prevLog === undefined) delete process.env.JAMGATE_GATE_LOG; else process.env.JAMGATE_GATE_LOG = prevLog;
+      if (prevStore === undefined) delete process.env.JAMGATE_STORE; else process.env.JAMGATE_STORE = prevStore;
+      await fs.rm(dir, { recursive: true, force: true });
+      await cleanup();
+    }
+  });
+});
