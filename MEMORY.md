@@ -9,7 +9,7 @@ Current state of the project. Update this at the end of every work session.
 > | | production | this laptop |
 > |---|---|---|
 > | path | `142.93.102.10:/var/lib/jamgate/memory.json` (`memory.amirj4m.com`, jamgate **0.9.2**) | `~/.jamgate/memory.json` (local stdio) |
-> | records | **43** (39 active, 29 recallable) | **11** (8 active) |
+> | records | **53** (39 active, **39 recallable — 0 expired**) | **11** (8 active) |
 > | last write | **2026-07-27T18:28Z — frozen for 9 days** | **2026-08-05**, still being written today |
 > | writers | `claude-code`, `Anthropic/ClaudeAI` | `local-agent-mode-jamgate` |
 >
@@ -67,9 +67,9 @@ Current state of the project. Update this at the end of every work session.
   - **Data repaired on the live production store** (backup `~/backups/jamgate-droplet-2026-08-05`,
     SHA-256 verified). `1ba22b6e` (profile+finance master record) carried the auto-derived
     subject `email` — any future `email` memory would have retired it; now
-    `profile-master-record`. Seven expired records re-typed to a durable type. **Expired
-    dropped 17 → 10; recallable 22 → 29.** Ten remain expired pending jam's decision (see
-    Open items). No memory text was altered; ids, count and schemaVersion unchanged.
+    `profile-master-record`. Seven expired records re-typed to a durable type (expired 17 → 10,
+    recallable 22 → 29); the remaining ten were then restored through the gate, above, taking
+    expired to 0. No memory text was altered.
   - **Documented, not blocking:** the D-040 auto-subject collapsed four real memories onto a
     bogus shared subject `location` back on 2026-07-21 (chain `a74458fb → c191336c → e367f5e0
     → 715d9c67`, the survivor later deleted) — the cause is fixed, the damaged records were

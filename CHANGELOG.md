@@ -24,6 +24,12 @@ test suite, which sent only well-formed values and never looked at what the stor
   silence was the bug. Measured cost of that silence: 44% of the real production store (17 of
   39 active records) was expired and invisible to recall, twelve of them explicitly asked for
   by a human.
+- **An expired memory can be replaced but no longer blocks a save** (D-057). Soft-expired
+  records keep `status: "active"`, so the duplicate and near-duplicate checks counted them as
+  live and answered `duplicate` to the very save that would have restored the fact — while
+  recall reported nothing stored. A fact could go dark and become permanently un-restorable
+  *because* it had gone dark. Live records still dedup exactly as before; supersession still
+  sees expired records, which is what turns a re-save into a revival.
 - **Deletes are recorded in the gate log** (D-056). `forget` wrote nothing, so the D-025
   training corpus held every acceptance and no reversal, and could not be reconciled with the
   store at all — 24 production log-writes had no surviving record and the log explained none of
