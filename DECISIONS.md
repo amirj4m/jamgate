@@ -1044,3 +1044,35 @@ because their values read as prose, not as credentials.
 **The general rule this encodes:** a gate rule that keys on sentence SHAPE must be tested
 against the paraphrases of the same fact, not just the shape that prompted it. One phrasing
 refused and its synonym stored is not a gate — it is a coin flip the caller cannot see.
+
+### D-051 — An API answers in the envelope its caller speaks, and returns nothing it computes with
+
+D-049 shipped the REST API with a documented contract: "Errors are plain JSON with a stable
+`error` code — not JSON-RPC, which stays confined to the MCP endpoint." Validating 0.10.0
+against a real HTTP client showed the contract was true for the errors REST itself produced
+and false for the two it did not:
+
+- **401** is produced by the shared auth gate, which runs BEFORE routing — so the single most
+  common error on a token-gated API was the one response a REST client could not parse
+  (`error` an object, no `message`, a `jsonrpc` field).
+- **404 on an unrouted `/v1/` path** fell through to the MCP handler and answered a REST typo
+  with "Not found. MCP endpoint is /mcp".
+
+Both are now REST-shaped, chosen by path; the MCP endpoint's JSON-RPC errors are untouched.
+The forget-miss and ambiguous-prefix bodies also gained the `message` field every other error
+carries, and the miss now **names the scope it searched** — forget is strictly scoped (D-048),
+so a scope mismatch is the likeliest cause and a message that never mentions scope sends the
+caller off to re-check a perfectly good id.
+
+The same pass removed the `embedding` vector from every REST response. A one-result recall was
+8.4 KB, of which ~8 KB was 384 floats; five results shipped ~40 KB of numbers to say five
+sentences. The vector is the input to near-duplicate detection and semantic recall — internal
+machinery the client gets the *verdict* of, never the operand. It stays on disk and in
+`export` (a backup that dropped embeddings would silently lose them on re-import).
+
+**The general rule this encodes:** two rules, both about the boundary rather than the feature.
+(1) When one server speaks two protocols, the ERROR path is where they leak into each other —
+every response produced before routing or after it fails must still pick its shape by caller,
+because that is exactly where the handler that knows the protocol is not in the stack.
+(2) A public response is a projection of the internal record, never the record itself; ship
+what the caller can act on.

@@ -12,6 +12,7 @@ import { VERSION } from "./version.js";
 import { createServer } from "./index.js";
 import { resolveGateLogConfig, type GateLogConfig } from "./gate/log.js";
 import { saveThroughGate } from "./gate/pipeline.js";
+import { normalizeScope } from "./store/scope.js";
 import type { OAuthStore } from "./oauth/store.js";
 import { handleOAuth, resourceMetadataUrl } from "./oauth/handlers.js";
 
@@ -39,6 +40,10 @@ const HEALTH_PATH = "/healthz";
 /** The plain-HTTP REST API prefix (D-049). A collection endpoint (`/v1/memory`) plus an item
  *  endpoint (`/v1/memory/:id`), served behind the same bearer gate as the MCP transport. */
 const REST_PREFIX = "/v1/memory";
+/** Everything the REST API owns, including paths under it that route to nothing. Used to pick
+ *  the ERROR envelope (D-051): a request to the REST API must be answered in REST's shape even
+ *  when the answer is produced before routing (401) or after it fails (404). */
+const REST_NAMESPACE = "/v1/";
 
 /** How to run: stdio (default) or the opt-in HTTP transport. Parsed from argv + env so the
  *  bootstrap in index.ts stays a thin switch and the parsing is unit-testable. */
@@ -172,11 +177,16 @@ export function startHttpServer(opts: HttpServerOptions): Promise<RunningHttpSer
       (err) => {
         console.error("jamgate http: unhandled request error:", err);
         if (!res.headersSent) {
-          sendJson(res, 500, {
-            jsonrpc: "2.0",
-            error: { code: -32603, message: "Internal server error" },
-            id: null,
-          });
+          // Same envelope rule as every other error (D-051): a REST caller gets REST's shape.
+          if (isRestNamespace(pathnameOf(req))) {
+            sendJson(res, 500, { error: "internal_error", message: "internal server error" });
+          } else {
+            sendJson(res, 500, {
+              jsonrpc: "2.0",
+              error: { code: -32603, message: "Internal server error" },
+              id: null,
+            });
+          }
         } else {
           res.end();
         }
@@ -264,11 +274,22 @@ async function handleRequest(
       ? `Bearer realm="jamgate", resource_metadata="${resourceMetadataUrl(req)}"`
       : 'Bearer realm="jamgate"';
     res.setHeader("WWW-Authenticate", wwwAuth);
-    sendJson(res, 401, {
-      jsonrpc: "2.0",
-      error: { code: -32001, message: "Unauthorized: valid bearer token required" },
-      id: null,
-    });
+    // Answer in the envelope the CALLER speaks (D-051). The auth gate runs before routing, so
+    // it used to hand a JSON-RPC error to REST clients too — making 401, the single most common
+    // error on a token-gated API, the one response whose shape didn't match the documented REST
+    // contract (`error` a string, alongside `message`).
+    if (isRestNamespace(reqPath)) {
+      sendJson(res, 401, {
+        error: "unauthorized",
+        message: "a valid bearer token is required",
+      });
+    } else {
+      sendJson(res, 401, {
+        jsonrpc: "2.0",
+        error: { code: -32001, message: "Unauthorized: valid bearer token required" },
+        id: null,
+      });
+    }
     return;
   }
 
@@ -281,6 +302,16 @@ async function handleRequest(
   //    OAuth endpoints were already handled above). Everything else is 404.
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   if (url.pathname !== ctx.path) {
+    // A path under /v1/ that `handleRest` did not claim is a REST typo, not an MCP request —
+    // answer it in REST's shape and name the routes that exist, rather than telling a REST
+    // client where the MCP endpoint is (D-051).
+    if (isRestNamespace(url.pathname)) {
+      sendJson(res, 404, {
+        error: "not_found",
+        message: `no REST route at ${url.pathname}. Routes are POST ${REST_PREFIX}, GET ${REST_PREFIX}, DELETE ${REST_PREFIX}/:id`,
+      });
+      return;
+    }
     sendJson(res, 404, {
       jsonrpc: "2.0",
       error: { code: -32601, message: `Not found. MCP endpoint is ${ctx.path}` },
@@ -441,11 +472,11 @@ async function handleRest(
     const status = r.action === "created" || r.action === "superseded" ? 201 : 200;
     sendJson(res, status, {
       action: r.action,
-      memory: r.memory,
-      ...(r.retired ? { retired: r.retired } : {}),
-      ...(r.conflictsWith ? { conflictsWith: r.conflictsWith } : {}),
-      ...(r.possibleDuplicates ? { possibleDuplicates: r.possibleDuplicates } : {}),
-      ...(r.relatedMemories ? { relatedMemories: r.relatedMemories } : {}),
+      memory: publicMemory(r.memory),
+      ...(r.retired ? { retired: r.retired.map(publicMemory) } : {}),
+      ...(r.conflictsWith ? { conflictsWith: r.conflictsWith.map(publicMemory) } : {}),
+      ...(r.possibleDuplicates ? { possibleDuplicates: r.possibleDuplicates.map(publicSimilar) } : {}),
+      ...(r.relatedMemories ? { relatedMemories: r.relatedMemories.map(publicSimilar) } : {}),
     });
     return true;
   }
@@ -458,7 +489,7 @@ async function handleRest(
     const parsed = limitRaw === null ? NaN : Number(limitRaw);
     const limit = Number.isInteger(parsed) && parsed > 0 ? parsed : 5;
     const memories = await ctx.store.recall(query, limit, false, scope);
-    sendJson(res, 200, { memories });
+    sendJson(res, 200, { memories: memories.map(publicMemory) });
     return true;
   }
 
@@ -474,9 +505,24 @@ async function handleRest(
     if (result.ok) {
       sendJson(res, 200, { ok: true, id: result.id });
     } else if (result.reason === "ambiguous") {
-      sendJson(res, 409, { ok: false, error: "ambiguous", matches: result.matches });
+      sendJson(res, 409, {
+        ok: false,
+        error: "ambiguous",
+        // Every other error here carries a human-readable `message` beside the machine-readable
+        // `error`; these two used to omit it, so a client rendering `message` showed nothing on
+        // exactly the two outcomes a human needs to read (D-051).
+        message: `"${id}" matches ${result.matches.length} memories in scope "${normalizeScope(scope)}" — pass more of the id`,
+        matches: result.matches,
+      });
     } else {
-      sendJson(res, 404, { ok: false, error: "not_found" });
+      sendJson(res, 404, {
+        ok: false,
+        error: "not_found",
+        // Name the scope that was searched (D-051). Forget is strictly scoped (D-048), so the
+        // overwhelmingly likely cause of a miss is a scope mismatch, not a bad id — and a
+        // message that doesn't mention scope sends the caller off to re-check the id instead.
+        message: `no memory with id "${id}" in scope "${normalizeScope(scope)}"`,
+      });
     }
     return true;
   }
@@ -517,6 +563,45 @@ function sendSessionNotFound(res: ServerResponse): void {
     },
     id: null,
   });
+}
+
+/**
+ * The wire form of a memory (D-051): everything the record holds EXCEPT its embedding.
+ *
+ * The 384-float vector is internal machinery — the input to near-duplicate detection and
+ * semantic recall — and it is meaningless to a client, which gets the gate's verdict instead.
+ * Serializing it made a one-result recall 8.4 KB where the memory itself is 200 bytes, so a
+ * five-result recall shipped ~40 KB of numbers to say five sentences. That is the whole
+ * response for a phone on cellular data, and it leaks an implementation detail into a public
+ * contract that would then be awkward to take back.
+ *
+ * The MCP path never had this problem — it renders text — so this is REST-only, and it changes
+ * nothing about what is STORED (the vector stays on disk; `export` still emits it, because a
+ * backup that dropped embeddings would silently lose them on re-import).
+ */
+function publicMemory<T extends { embedding?: unknown }>(memory: T): Omit<T, "embedding"> {
+  const { embedding: _embedding, ...rest } = memory;
+  return rest;
+}
+
+/** Same projection for the `{memory, similarity}` pairs the near-duplicate and related-memory
+ *  outcomes carry. The similarity score is kept — it is the part a client can act on. */
+function publicSimilar<T extends { memory: { embedding?: unknown }; similarity: number }>(
+  hit: T,
+): { memory: Omit<T["memory"], "embedding">; similarity: number } {
+  return { memory: publicMemory(hit.memory), similarity: hit.similarity };
+}
+
+/** The request's pathname, resolved the same way every handler here resolves it. */
+function pathnameOf(req: IncomingMessage): string {
+  return new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`).pathname;
+}
+
+/** Does this path address the REST API (D-051)? Deliberately the whole `/v1/` namespace, not
+ *  just the routes that exist — a caller who typo'd the path is still a REST caller, and the
+ *  error it gets back has to be parseable by the same code that parses the successes. */
+function isRestNamespace(pathname: string): boolean {
+  return pathname === REST_PREFIX || pathname.startsWith(REST_NAMESPACE);
 }
 
 function header(req: IncomingMessage, name: string): string | undefined {
