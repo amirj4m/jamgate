@@ -67,11 +67,18 @@ a small LLM only for the thin "is this worth keeping?" classifier on ambiguous c
    never `--no-verify`. Nothing stays only on local disk.
 3. **Not done until tested.** No "I think it works" — run it against a real MCP
    agent (Claude Code / Cowork / Cursor) before claiming done.
-4. **Documentation never lags, and every change ships.** Done means: committed, with
-   `CHANGELOG.md` and every doc the change makes untrue updated *in the same session*,
-   versions bumped in lockstep (`package.json` + `src/version.ts` + `server.json`), tagged,
-   published to npm, and a GitHub Release cut with the `.mcpb` attached. **Never leave work
-   sitting on `master` untagged.** See `RULES.md` §8 for the checklist and why.
+4. **Documentation never lags, and every release-bound change ships.** The test is one
+   question: *can a user consume this file and be misled about what they are getting?*
+   - **Yes → release-bound**: `src/**`, `package.json`, `src/version.ts`, `server.json`,
+     `README.md`, `CHANGELOG.md`, `skills/**`, the `.mcpb`, the publish workflows. Not done
+     until committed **and** versions bumped in lockstep **and** tagged, published and
+     released. **Never leave release-bound work on `master` untagged.**
+   - **No → internal state**: `MEMORY.md`, `DECISIONS.md`, `docs/**`, session notes. Same
+     discipline, same immediacy — written in the same session, never stale — but no version
+     bump and no release of their own.
+   - Touching both? The release-bound half decides: it ships.
+
+   See `RULES.md` §8 for the checklist and the reasoning.
 5. **Session ritual:** read `RULES.md` at the start; update `MEMORY.md` (and
    `DECISIONS.md` if a real decision was made) at the end.
 

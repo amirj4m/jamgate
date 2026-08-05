@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-08-05
+
+### Documentation
+
+- **The "every change ships" rule now draws an explicit boundary** (D-062, refining D-060).
+  As first written the rule said *every* change ships, which left it to taste whether a
+  session note in `MEMORY.md` warranted a release — and a rule decided by taste is one the
+  next contributor gets wrong.
+
+  The boundary is now stated, and stated with its reason so it is derivable rather than
+  memorised. The rule exists to stop a user consuming an artifact that **lies about itself**;
+  the test for any file is *can a user consume this and be misled about what they are getting
+  or how to use it?*
+  - **Release-bound** (yes): `src/**`, `package.json`, `src/version.ts`, `server.json`,
+    `README.md`, `CHANGELOG.md`, `skills/**`, the `.mcpb` bundle, and the publish workflows.
+    Not finished until tagged, published and released.
+  - **Internal state** (no): `MEMORY.md`, `DECISIONS.md`, `docs/**`, session notes. Same
+    discipline and same immediacy — written in the same session, never left stale — but no
+    version bump and no release of their own.
+  - A change touching both ships, because the release-bound half decides.
+
+  Updated in `RULES.md` §8 and `AGENTS.md`.
+
 ## [0.10.1] - 2026-08-05
 
 ### Fixed
@@ -723,7 +746,8 @@ single shared memory clean at write time instead of letting it bloat with junk.
 - Verified end-to-end over the MCP protocol and covered by an automated test suite
   (89 tests) running on Node 20.x and 22.x in CI.
 
-[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/amirj4m/jamgate/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/amirj4m/jamgate/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/amirj4m/jamgate/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/amirj4m/jamgate/compare/v0.9.1...v0.9.2

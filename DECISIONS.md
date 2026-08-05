@@ -1368,3 +1368,41 @@ corpus is later analysed. A `--dry-run` logs nothing: a preview decides nothing.
 was left behind at the old call site. Import reused the gate — the valuable part — and
 silently dropped the observability that had been wrapped around it. Reuse moves the logic,
 not the cross-cutting concerns that surrounded it.
+
+### D-062 — Which artifacts are release-bound, and why that is the boundary (refines D-060)
+
+D-060 said *every* change ships. That was right in spirit and ambiguous in letter: it left
+open whether a session note in `MEMORY.md` — internal project state that no user ever
+consumes — obliges a version bump and a release. The first time the question came up it was
+settled by judgment, and a rule settled by judgment is one the next contributor settles the
+other way.
+
+So the boundary is now written down, together with the reason, so it can be **derived** rather
+than looked up.
+
+**The reason.** This rule protects a user from consuming an artifact that **lies about
+itself**. Every incident behind D-060 is that failure: a README pointing at a `.mcpb` five
+versions old, a `server.json` telling the registry to install a version that was never
+published, a skill file instructing agents to write subjects in a convention the gate had
+abandoned — which silently produced contradictory memories (D-052).
+
+**The test**, for any file: *can a user consume this and be misled about what they are getting
+or how to use it?*
+
+- **Yes → release-bound.** `src/**`, `package.json`, `src/version.ts`, `server.json`,
+  `README.md`, `CHANGELOG.md`, `skills/**`, the `.mcpb` bundle, and the workflows that build
+  and publish them. A change to any of these is not finished until it is tagged, published and
+  released.
+- **No → internal state.** `MEMORY.md`, `DECISIONS.md`, `docs/**`, session notes. Nobody
+  installs these and no agent acts on them to use the product. They are held to the same
+  discipline and the same immediacy — written in the same session as the work, never left
+  describing a state that has passed — but they do not trigger a release on their own.
+- **Both → it ships.** The release-bound half decides.
+
+Cutting a release for a session note is not extra rigour; it is cargo-culting the rule while
+missing what it is for.
+
+**The general rule this encodes:** a rule stated without its purpose can only be obeyed
+literally, and literal obedience fails at exactly the edge cases the rule was written for.
+State the reason, and the boundary becomes something a reader can work out for a case nobody
+anticipated.

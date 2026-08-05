@@ -151,21 +151,44 @@ audit found 97.8%; see D-016). Pure hard-coded rules can't make a semantic judgm
 - The core must run **locally (stdio), zero hosting cost**, for the MVP.
 - One independent commit per task. English commit messages, one line, the task title.
   Never `git add -A`, never `--no-verify`, never force-push to main.
-- **DOCUMENTATION NEVER LAGS THE WORK, AND EVERY CHANGE SHIPS.** A change is not finished
-  when the code works — it is finished when it is committed, its docs and `CHANGELOG.md`
-  are updated *in the same breath*, it is tagged, and it is published. This has the same
-  weight as every other rule here. Concretely, for **any** change, however small:
-  1. commit it (one task, one commit);
-  2. update `CHANGELOG.md`, and any README/skill/decision text the change makes untrue —
-     in the same session, not "later";
-  3. bump `package.json`, `src/version.ts` and `server.json` together;
-  4. tag `vX.Y.Z` and push the tag, which publishes to npm;
-  5. cut the GitHub Release, attaching the `.mcpb` bundle.
+- **DOCUMENTATION NEVER LAGS THE WORK, AND EVERY RELEASE-BOUND CHANGE SHIPS.** A change is
+  not finished when the code works — it is finished when it is committed, everything it makes
+  untrue is corrected *in the same breath*, and, if it touches a release-bound artifact, it is
+  tagged, published and released. This has the same weight as every other rule here.
+
+  **Why, so the boundary below is derivable and not memorised:** the rule exists to stop a
+  user consuming something that **lies about itself**. A stale README sends them to a bundle
+  that is five versions old. A stale `server.json` makes the registry install a version that
+  was never published. A stale skill file tells their agent to write subjects in a convention
+  the gate no longer uses, and silently corrupts their memory (that one really happened —
+  D-052). The test for any file is one question: *can a user consume this and be misled about
+  what they are getting or how to use it?*
+
+  **RELEASE-BOUND — anything a user consumes.** Yes to that question:
+  `src/**` · `package.json` · `src/version.ts` · `server.json` (the registry manifest) ·
+  `README.md` · `CHANGELOG.md` · `skills/**` · the `.mcpb` bundle · the workflows that build
+  and publish them. A change to **any** of these is not done until:
+  1. it is committed (one task, one commit);
+  2. `CHANGELOG.md` and every other release-bound file the change makes untrue are updated in
+     the same session, not "later";
+  3. `package.json`, `src/version.ts` and `server.json` are bumped together;
+  4. `vX.Y.Z` is tagged and pushed, which publishes to npm and the MCP registry;
+  5. the GitHub Release is cut with the `.mcpb` attached.
+
   **Work must not sit on `master` untagged.** 0.10.0 sat unreleased for thirteen days while
-  its own README pointed new users at a `.mcpb` from v0.5.0, and the on-disk docs drifted
-  seven phases out of date. A patch-level release is cheap; stale documentation and an
-  unshipped `master` are not. If a change is too small to release, it is still too small to
-  leave undocumented — release it anyway.
+  its own README pointed new users at a `.mcpb` from v0.5.0. A patch release is cheap; a
+  published artifact that misdescribes itself is not. If a change is too small to release, it
+  is still too small to leave undocumented — release it anyway.
+
+  **INTERNAL PROJECT STATE — no to that question, so no release.** `MEMORY.md` ·
+  `DECISIONS.md` · `docs/**` design notes · session notes. Nobody installs these and no agent
+  acts on them to use the product, so they cannot mislead a user about what they received.
+  They are held to the **same discipline and the same immediacy** — written in the same
+  session as the work, never left for "later", never allowed to describe a state that has
+  passed — but they do **not** trigger a version bump or a release on their own. Cutting a
+  release for a session note is cargo-culting this rule, not honouring it.
+
+  When a single change touches both kinds, the release-bound half decides: it ships.
 - No new markdown/README files without an explicit request.
 - License: MIT. Public repo on GitHub.
 

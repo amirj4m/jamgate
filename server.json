@@ -6,12 +6,12 @@
     "url": "https://github.com/amirj4m/jamgate",
     "source": "github"
   },
-  "version": "0.10.1",
+  "version": "0.10.2",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "jamgate",
-      "version": "0.10.1",
+      "version": "0.10.2",
       "transport": {
         "type": "stdio"
       }
