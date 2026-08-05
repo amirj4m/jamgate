@@ -3,6 +3,35 @@
 Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
+- **0.10.0 VALIDATED against real clients; six bugs found, six fixed (2026-08-05; D-050…D-053).**
+  RULES §9 run end-to-end against a **real MCP agent** (Claude Code 2.1.217, over stdio and over
+  Streamable HTTP) plus the official MCP SDK client and `curl` — not just unit tests. Junk
+  rejected, real fact kept, Windows→Linux superseded rather than duplicated, forget round-trip
+  clean, all confirmed on the fixed build (29/29 assertions against a live server, 433 unit
+  tests green). The three scope invariants hold on **both** transports: two scopes hold
+  contradictory facts on one subject without interfering; an id from scope A is neither
+  recallable nor deletable from scope B (full id, 8-char prefix, or default scope); and a
+  credential over REST is refused byte-identically to the MCP tool (10-case parity matrix).
+  - **Fixed — the gate stored a plaintext password (D-050).** `the password FOR X is Y` walked
+    straight through while `X password is Y` was refused. One preposition apart, same fact,
+    both transports. Now refused and redacted from the gate log.
+  - **Fixed — two subject conventions (D-052).** The skill said dotted, the gate derived
+    hyphenated, and subject equality drives supersession — so two contradicting "where jam
+    lives" memories sat side by side, which RULES §10 forbids outright. Hyphens win; `.`/`_`/
+    space fold to `-` on write **and read**, so legacy records still supersede.
+  - **Fixed — REST spoke JSON-RPC on its two most common errors (D-051)**, contradicting the
+    contract D-049 documents; and every REST response shipped the 384-float embedding (a
+    one-result recall was 8.4 KB → now 245 bytes).
+  - **Fixed — `server.json` was nine releases stale** at 0.1.0; now version-locked by a test.
+  - **Fixed — the embedder test assumed the optional peer was absent**, so `npm test` failed on
+    any machine with semantic recall actually installed.
+  - **Documented, not fixed — the droplet's nginx is path-scoped (D-053).** Verified live:
+    `GET /v1/memory` → **404 text/html from nginx**, never reaching Jamgate (`/mcp` → 401,
+    `/healthz` → 200, both fine). The REST API is unreachable in production until the proxy
+    gains a `location /v1/`. The droplet was NOT touched; the required blocks and a
+    401-vs-404 check are now in the README's remote-mode section for the deploy step.
+  - **Still gated on jam's OK:** `npm publish`, the `v*` tag, and the droplet deploy. Nothing
+    was published, tagged or deployed.
 - **0.10.0 — namespaces + a REST API, so Jamgate can back an app (2026-07-23; D-048, D-049).**
   Both additive and backward-compatible; the live single-tenant store is untouched. **Scopes
   (D-048):** an optional `scope` (opaque label, e.g. `amir/greek`) on a memory and on

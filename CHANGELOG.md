@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-*Found by validating 0.10.0 against a real MCP client and a real HTTP client before release;
-0.10.0 has not been published, so these land with it.*
+*Found by validating 0.10.0 against a real MCP client and a real HTTP client before release.
+0.10.0 was committed but never tagged or published (npm latest is 0.9.2), so at tag time these
+either fold into the 0.10.0 entry above or ship as 0.10.1 — a call for the release step.*
 
 - **A password stated as "the password for X is Y" is now refused** (D-050). The gate caught
   `jam's mysql password is …` but stored the more natural `the password for jam's mysql
