@@ -1306,3 +1306,38 @@ reading a caller can act on.
 writes. When a mechanism makes data invisible, every check that consults that data has to
 agree about what invisible means — otherwise the system holds two contradictory beliefs about
 the same record and hands the user whichever one is least useful.
+
+### D-060 — Documentation never lags the work, and every change ships
+
+A standing rule from the maintainer, with the same weight as the golden rules in AGENTS.md,
+written into `RULES.md` §8 rather than left as a decision entry alone — a rule nobody reads at
+the top of a session is not a rule.
+
+**A change is finished when it is released, not when it compiles.** For any change, however
+small: commit it → update `CHANGELOG.md` and every doc it makes untrue, in the same session →
+bump `package.json`, `src/version.ts` and `server.json` together → tag → publish → cut the
+GitHub Release with the `.mcpb`.
+
+The evidence for why is this project's own history, all of it found on 2026-08-05:
+
+- **0.10.0 sat on `master` for thirteen days, tagged nowhere and published nowhere**, while npm
+  `latest` served 0.9.2 and its own README told every new Claude Desktop user to download the
+  bundle from "the latest release" — which was **v0.5.0**, five versions and one architecture
+  behind. The link was not broken by a bug; it was broken by not shipping.
+- **GitHub Releases stopped at v0.5.0.** Eleven tagged versions had no release at all.
+- **`server.json` sat at `0.1.0` while the package was `0.10.0`** — nine releases stale, because
+  nothing in a normal build or test run ever read it.
+- **`MEMORY.md`'s "What's next" was seven phases out of date**, still listing TTL, atomic writes
+  and auto-subject as pending, all of which had shipped in Phase 2/3.
+- **The `memory-discipline` skill told agents to use dotted subjects** long after the gate had
+  settled on hyphenated ones — and because subject equality drives supersession, that stale
+  doc actively corrupted data (D-052).
+
+That last one is the point. Stale documentation is not cosmetic debt: in a system whose
+behaviour is *specified* to callers through documentation, a doc that lags the code is a
+defect that produces wrong data. The README lying about the bundle cost every new user; the
+skill lying about subjects cost the maintainer contradictory memories about where he lives.
+
+**The general rule this encodes:** shipping is part of the change, not a separate later
+activity. A patch release is cheap; an unshipped `master` and a doc that contradicts the code
+are not — and both get more expensive the longer they sit.

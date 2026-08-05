@@ -67,7 +67,12 @@ a small LLM only for the thin "is this worth keeping?" classifier on ambiguous c
    never `--no-verify`. Nothing stays only on local disk.
 3. **Not done until tested.** No "I think it works" — run it against a real MCP
    agent (Claude Code / Cowork / Cursor) before claiming done.
-4. **Session ritual:** read `RULES.md` at the start; update `MEMORY.md` (and
+4. **Documentation never lags, and every change ships.** Done means: committed, with
+   `CHANGELOG.md` and every doc the change makes untrue updated *in the same session*,
+   versions bumped in lockstep (`package.json` + `src/version.ts` + `server.json`), tagged,
+   published to npm, and a GitHub Release cut with the `.mcpb` attached. **Never leave work
+   sitting on `master` untagged.** See `RULES.md` §8 for the checklist and why.
+5. **Session ritual:** read `RULES.md` at the start; update `MEMORY.md` (and
    `DECISIONS.md` if a real decision was made) at the end.
 
 **If this summary and `RULES.md` ever disagree, `RULES.md` is right.**

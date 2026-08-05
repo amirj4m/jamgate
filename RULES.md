@@ -151,6 +151,21 @@ audit found 97.8%; see D-016). Pure hard-coded rules can't make a semantic judgm
 - The core must run **locally (stdio), zero hosting cost**, for the MVP.
 - One independent commit per task. English commit messages, one line, the task title.
   Never `git add -A`, never `--no-verify`, never force-push to main.
+- **DOCUMENTATION NEVER LAGS THE WORK, AND EVERY CHANGE SHIPS.** A change is not finished
+  when the code works — it is finished when it is committed, its docs and `CHANGELOG.md`
+  are updated *in the same breath*, it is tagged, and it is published. This has the same
+  weight as every other rule here. Concretely, for **any** change, however small:
+  1. commit it (one task, one commit);
+  2. update `CHANGELOG.md`, and any README/skill/decision text the change makes untrue —
+     in the same session, not "later";
+  3. bump `package.json`, `src/version.ts` and `server.json` together;
+  4. tag `vX.Y.Z` and push the tag, which publishes to npm;
+  5. cut the GitHub Release, attaching the `.mcpb` bundle.
+  **Work must not sit on `master` untagged.** 0.10.0 sat unreleased for thirteen days while
+  its own README pointed new users at a `.mcpb` from v0.5.0, and the on-disk docs drifted
+  seven phases out of date. A patch-level release is cheap; stale documentation and an
+  unshipped `master` are not. If a change is too small to release, it is still too small to
+  leave undocumented — release it anyway.
 - No new markdown/README files without an explicit request.
 - License: MIT. Public repo on GitHub.
 
