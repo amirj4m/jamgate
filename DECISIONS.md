@@ -250,6 +250,13 @@ an invented one is not. Derivation lives in the gate/server layer, keeping the s
 mechanical. Later, the embedding layer (D-026) or the thin classifier (D-004) can improve this
 with semantic subject clustering. Phase 3.
 
+### D-028 — *(unused number)*
+Reserved during Phase 3 for a separate "fuzzy lexical relevance" entry and never written: the
+fuzzy scorer shipped as part of D-026's recall work and is described there (D-026 mentions "the
+fuzzy layer (D-028)"; that reference is the only trace). Nothing was decided under this number
+and nothing was reversed — the gap is bookkeeping, not a missing decision. Left unused rather
+than recycled, so that dangling reference still resolves to something truthful.
+
 ---
 
 ## Phase 5 — Remote (optional): one self-hosted instance behind an endpoint, shared by all a person's agents
@@ -357,6 +364,13 @@ build machine, so the image layering was not built; instead the exact runtime en
 `$PORT` honored, `/healthz` unauthenticated, `/mcp` 401 without a token) and the `--omit=dev`
 production install were verified locally, and the HTTP MCP round-trip is covered by the existing
 test suite. Phase 7.
+
+### D-032 — *(unused number)*
+Reserved during Phase 7 (deploy templates) for a second entry alongside D-031 and never
+written — the one decision that phase produced is D-031, which covers it. Nothing was decided
+under this number and nothing was reversed; the gap is bookkeeping. Left unused rather than
+recycled so that decision ids stay stable references forever, which is the only property that
+makes citing one in a commit message worth anything.
 
 ## Phase 8 — Backup & migration: move your memory without hand-copying a file
 
