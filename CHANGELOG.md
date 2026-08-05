@@ -7,11 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-23
+
+### Added
+
+- **Namespaces (scopes)** (D-048). An optional `scope` (an opaque label such as `amir/greek`)
+  can now be attached to a memory and to every operation, so one instance can hold several
+  isolated memories that never blend. The gate itself is per scope — dedup, subject
+  supersession, the source-trust conflict guard and the semantic near-duplicate check all
+  compare a candidate only against memories in the SAME scope — and recall/forget are strictly
+  scoped, so one namespace can never read or delete another's memory even with the exact id.
+  - **Fully backward-compatible.** An absent or empty scope resolves to a single `"default"`
+    namespace that reproduces the exact pre-namespace, single-tenant behaviour. Existing
+    clients call `save`/`recall`/`forget` unchanged and land in `"default"`.
+  - **Auto-migration**: `schemaVersion` 2 → 3. On read, any record without a scope is stamped
+    `"default"` (a record already in a named scope keeps it) and the upgraded shape persists on
+    the next write — no data loss, no behaviour change for an existing store.
+  - The three MCP tools gained an optional `scope` parameter, added the same additive way as
+    the earlier `content`/`memory` aliases — no existing tool call breaks.
+- **REST API alongside MCP** (D-049). The `--http` server now also serves a small REST API on
+  the same port, behind the same bearer token (static or OAuth) as the MCP endpoint, so an
+  ordinary app backend can use Jamgate without speaking JSON-RPC:
+  - `POST /v1/memory` `{text, scope?, type?, subject?, source?}` — save (accepts the
+    `content`/`memory` aliases too);
+  - `GET /v1/memory?query=&scope=&limit=` — recall;
+  - `DELETE /v1/memory/:id?scope=` — forget.
+
+  Saves on REST and MCP funnel through one shared gate pipeline, so they behave identically
+  (dedup, supersession, conflict, secret refusal), per scope. Status codes mirror the gate
+  outcome (`201` created/superseded, `200` for a deliberate no-store or a prefilter rejection,
+  `400`/`404`/`409` for malformed requests and forget misses); errors are plain JSON with a
+  stable `error` code. The MCP transport and the OAuth flow are untouched.
+
+### Changed
+
+- The MCP `save_memory` handler was refactored onto the shared gate pipeline it now shares with
+  the REST API, so the two surfaces can never diverge. No change to its behaviour or replies.
 ### Fixed
 
-*Found by validating 0.10.0 against a real MCP client and a real HTTP client before release.
-0.10.0 was committed but never tagged or published (npm latest is 0.9.2), so at tag time these
-either fold into the 0.10.0 entry above or ship as 0.10.1 — a call for the release step.*
+*Found by validating this release against a real MCP client and a real HTTP client before
+tagging it, and fixed before it shipped — 0.10.0 was never tagged or published, so nothing
+below was ever visible outside the repo.*
 
 - **A password stated as "the password for X is Y" is now refused** (D-050). The gate caught
   `jam's mysql password is …` but stored the more natural `the password for jam's mysql
@@ -51,43 +87,6 @@ either fold into the 0.10.0 entry above or ship as 0.10.1 — a call for the rel
   beside `JAMGATE_STORE`) since D-037, not always at `~/.jamgate/gate.log`.
 - The `memory-discipline` skill gained the `scope` guidance it never had, and `DECISIONS.md`
   now records why D-028 and D-032 are unused numbers.
-
-## [0.10.0] - 2026-07-23
-
-### Added
-
-- **Namespaces (scopes)** (D-048). An optional `scope` (an opaque label such as `amir/greek`)
-  can now be attached to a memory and to every operation, so one instance can hold several
-  isolated memories that never blend. The gate itself is per scope — dedup, subject
-  supersession, the source-trust conflict guard and the semantic near-duplicate check all
-  compare a candidate only against memories in the SAME scope — and recall/forget are strictly
-  scoped, so one namespace can never read or delete another's memory even with the exact id.
-  - **Fully backward-compatible.** An absent or empty scope resolves to a single `"default"`
-    namespace that reproduces the exact pre-namespace, single-tenant behaviour. Existing
-    clients call `save`/`recall`/`forget` unchanged and land in `"default"`.
-  - **Auto-migration**: `schemaVersion` 2 → 3. On read, any record without a scope is stamped
-    `"default"` (a record already in a named scope keeps it) and the upgraded shape persists on
-    the next write — no data loss, no behaviour change for an existing store.
-  - The three MCP tools gained an optional `scope` parameter, added the same additive way as
-    the earlier `content`/`memory` aliases — no existing tool call breaks.
-- **REST API alongside MCP** (D-049). The `--http` server now also serves a small REST API on
-  the same port, behind the same bearer token (static or OAuth) as the MCP endpoint, so an
-  ordinary app backend can use Jamgate without speaking JSON-RPC:
-  - `POST /v1/memory` `{text, scope?, type?, subject?, source?}` — save (accepts the
-    `content`/`memory` aliases too);
-  - `GET /v1/memory?query=&scope=&limit=` — recall;
-  - `DELETE /v1/memory/:id?scope=` — forget.
-
-  Saves on REST and MCP funnel through one shared gate pipeline, so they behave identically
-  (dedup, supersession, conflict, secret refusal), per scope. Status codes mirror the gate
-  outcome (`201` created/superseded, `200` for a deliberate no-store or a prefilter rejection,
-  `400`/`404`/`409` for malformed requests and forget misses); errors are plain JSON with a
-  stable `error` code. The MCP transport and the OAuth flow are untouched.
-
-### Changed
-
-- The MCP `save_memory` handler was refactored onto the shared gate pipeline it now shares with
-  the REST API, so the two surfaces can never diverge. No change to its behaviour or replies.
 
 ## [0.9.2] - 2026-07-22
 
@@ -658,12 +657,21 @@ single shared memory clean at write time instead of letting it bloat with junk.
 - Verified end-to-end over the MCP protocol and covered by an automated test suite
   (89 tests) running on Node 20.x and 22.x in CI.
 
-[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/amirj4m/jamgate/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/amirj4m/jamgate/compare/v0.9.2...v0.10.0
+[0.9.2]: https://github.com/amirj4m/jamgate/compare/v0.9.1...v0.9.2
+[0.9.1]: https://github.com/amirj4m/jamgate/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/amirj4m/jamgate/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/amirj4m/jamgate/compare/v0.7.5...v0.8.0
+[0.7.5]: https://github.com/amirj4m/jamgate/compare/v0.7.4...v0.7.5
+[0.7.4]: https://github.com/amirj4m/jamgate/compare/v0.7.3...v0.7.4
+[0.7.3]: https://github.com/amirj4m/jamgate/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/amirj4m/jamgate/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/amirj4m/jamgate/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/amirj4m/jamgate/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/amirj4m/jamgate/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/amirj4m/jamgate/compare/v0.4.0...v0.5.0
+[0.5.0]: https://github.com/amirj4m/jamgate/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/amirj4m/jamgate/compare/v0.3.0...v0.4.1
 [0.4.0]: https://github.com/amirj4m/jamgate/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/amirj4m/jamgate/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/amirj4m/jamgate/compare/v0.1.0...v0.2.0
