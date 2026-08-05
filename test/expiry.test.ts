@@ -207,3 +207,105 @@ describe("expired records are discoverable, not merely absent (D-055)", () => {
     }
   });
 });
+
+/**
+ * D-057. Soft expiry keeps `status: "active"` and merely hides a record from recall — so the
+ * duplicate and near-duplicate checks counted expired records as live and refused the very
+ * save that would bring the fact back. The caller was told "already known" about something
+ * recall denied existed. Found while restoring the ten expired production records: every one
+ * came back `duplicate` and nothing could be revived.
+ */
+describe("an expired record can be replaced but never blocks (D-057)", () => {
+  it("re-saving an expired fact revives it instead of answering duplicate", async () => {
+    const { store, path, cleanup } = await tempStore();
+    try {
+      await store.save({
+        text: "eFood pay structure: 70/30 split, paid twice a month",
+        type: "state",
+        subject: "efood-payment-structure",
+        source: "user-explicit",
+      });
+      await backdate(path, () => true, 10);
+      assert.equal((await store.recall("", 10)).length, 0, "expired → invisible");
+
+      const revived = await store.save({
+        text: "eFood pay structure: 70/30 split, paid twice a month",
+        type: "identity",
+        subject: "efood-payment-structure",
+        source: "user-explicit",
+      });
+      assert.equal(revived.action, "superseded", "not 'duplicate' — the stale copy is retired");
+      assert.equal(revived.retired?.length, 1);
+      assert.equal(revived.memory.expiresAt, undefined, "identity never expires");
+
+      const live = await store.recall("", 10);
+      assert.equal(live.length, 1);
+      assert.match(live[0].text, /eFood pay structure/);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("revives a subject-less expired fact as a fresh record", async () => {
+    // Without a subject there is nothing to supersede, so the correct answer is "created" —
+    // what must NOT happen is "duplicate", which leaves the fact invisible forever.
+    const { store, path, cleanup } = await tempStore();
+    try {
+      await store.save({ text: "jam's May 2026 income summary", type: "state", source: "user-explicit" });
+      await backdate(path, () => true, 10);
+
+      const again = await store.save({
+        text: "jam's May 2026 income summary",
+        type: "project",
+        source: "user-explicit",
+      });
+      assert.equal(again.action, "created");
+      assert.equal((await store.recall("", 10)).length, 1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("a LIVE duplicate is still refused — the fix must not disable dedup", async () => {
+    const { store, cleanup } = await tempStore();
+    try {
+      await store.save({ text: "jam maintains an open-source memory gate", type: "project", source: "user-explicit" });
+      const second = await store.save({
+        text: "jam maintains an open-source memory gate",
+        type: "project",
+        source: "user-explicit",
+      });
+      assert.equal(second.action, "duplicate", "RULES §2.2 still holds for live records");
+      assert.equal((await store.recall("", 10)).length, 1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("an expired near-duplicate does not refuse a live save", async () => {
+    const embedder = {
+      id: "fixed",
+      dimensions: 3,
+      async embed() {
+        return [1, 0, 0]; // everything is identical → cosine 1.0, far above the 0.88 bar
+      },
+    };
+    const { path, cleanup } = await tempStore();
+    const { FileStore } = await import("../src/store/fileStore.js");
+    try {
+      const store = new FileStore(path, { embedder });
+      await store.save({ text: "jam tracked his subscriptions mid 2026", type: "state", source: "user-explicit" });
+      await backdate(path, () => true, 10);
+
+      const fresh = await store.save({
+        text: "jam tracked his monthly subscriptions during 2026",
+        type: "project",
+        source: "user-explicit",
+      });
+      assert.notEqual(fresh.action, "possible_duplicate", "a hidden record must not refuse a live save");
+      assert.equal(fresh.action, "created");
+    } finally {
+      await cleanup();
+    }
+  });
+});

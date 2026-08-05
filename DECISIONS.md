@@ -1273,3 +1273,36 @@ identifier, not a decision about a memory — the same line D-037 and D-054 draw
 **The general rule this encodes:** if a log exists to be learned from, it has to record the
 reversals, not just the commits. Any event that undoes a logged decision is itself a decision,
 and the more informative one — corrections are where the signal is.
+
+### D-057 — An expired memory may be replaced, but it must never block
+
+Soft expiry (D-021) leaves a record at `status: "active"` and merely hides it from recall. The
+duplicate and near-duplicate checks filtered on `status === "active"` alone, so they counted
+hidden records as live — and refused the exact save that would have brought the fact back:
+
+```
+recall("")                                   → 0 records   (expired, hidden)
+save(same text, durable type, same subject)  → "duplicate" (already known)
+recall("")                                   → 0 records   (still hidden)
+```
+
+Two answers that cannot both be acted on. The caller is told the memory is already known; the
+user is told nothing is stored; there is no third call that resolves it. A fact could go dark
+and then be permanently un-restorable *because it had gone dark*.
+
+Found by trying to restore the ten expired production records. Every one came back
+`duplicate`, and nothing could be revived — the audit's remedy was blocked by the same class of
+bug the audit was about.
+
+**Decision:** an expired record is excluded from the exact-duplicate check and from the
+semantic near-duplicate check. It is deliberately still visible to **subject supersession** —
+re-asserting a fact on the same subject SHOULD retire the stale copy rather than sit beside
+it, which is what turns a re-save into a revival (`superseded`, old retired for audit) instead
+of a second copy. Live records still dedup exactly as before (RULES §2.2 is untouched);
+"already known" now means "already known **and currently recallable**", which is the only
+reading a caller can act on.
+
+**The general rule this encodes:** a record hidden from reads must not still be enforcing
+writes. When a mechanism makes data invisible, every check that consults that data has to
+agree about what invisible means — otherwise the system holds two contradictory beliefs about
+the same record and hands the user whichever one is least useful.

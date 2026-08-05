@@ -274,9 +274,20 @@ export class FileStore implements MemoryStore {
     const scope = memScope(candidate);
     candidate.scope = scope;
 
+    // An EXPIRED record may be replaced, but it may never BLOCK (D-057). A soft-expired
+    // memory keeps `status: "active"` and is merely hidden from recall — so the duplicate and
+    // near-duplicate checks below used to count it as live and refuse the very save that would
+    // bring the fact back. The caller was told "already known" about something recall denies
+    // exists: two answers that cannot both be acted on, and no way out of the loop.
+    //
+    // Supersession deliberately still sees expired records (further down): re-asserting a fact
+    // on the same subject SHOULD retire the stale copy. Replaceable, not obstructive.
+    const nowMs = new Date(now).getTime();
+    const live = (m: Memory) => m.status === "active" && !isExpired(m.expiresAt, nowMs);
+
     const norm = candidate.text.trim().toLowerCase();
     const existing = memories.find(
-      (m) => m.status === "active" && memScope(m) === scope && m.text.trim().toLowerCase() === norm,
+      (m) => live(m) && memScope(m) === scope && m.text.trim().toLowerCase() === norm,
     );
     if (existing) return { action: "duplicate", memory: existing };
 
@@ -322,7 +333,9 @@ export class FileStore implements MemoryStore {
     // mistaken for a duplicate.
     let related: Array<{ memory: Memory; similarity: number }> = [];
     if (retired.length === 0 && candidate.embedding) {
-      const near = this.findSimilar(candidate.embedding, memories, DEFAULT_RELATED_MIN, scope);
+      // Expired look-alikes are excluded here for the same reason as the exact duplicate
+      // above (D-057): a hidden record must not refuse a live save.
+      const near = this.findSimilar(candidate.embedding, memories, DEFAULT_RELATED_MIN, scope, nowMs);
       const duplicates = near.filter((x) => x.similarity >= this.dupThreshold);
       if (duplicates.length > 0) {
         return {
@@ -524,17 +537,25 @@ export class FileStore implements MemoryStore {
 
   /** Active memories in `scope` whose embedding is at/above `floor` similarity to `vec`, most
    *  similar first. Near-duplicate detection is per-namespace (D-048), so a look-alike in
-   *  another scope never blocks or annotates this save. Records without an embedding
-   *  (older/pre-embedding saves) are simply skipped — they can't be compared, and we never
+   *  another scope never blocks or annotates this save. Expired records are skipped too — a
+   *  memory hidden from recall must not refuse or annotate a live save (D-057). Records
+   *  without an embedding (older/pre-embedding saves) are simply skipped — they can't be compared, and we never
    *  guess a near-match (D-026). */
   private findSimilar(
     vec: number[],
     memories: Memory[],
     floor: number,
     scope: string,
+    nowMs: number,
   ): Array<{ memory: Memory; similarity: number }> {
     return memories
-      .filter((m) => m.status === "active" && memScope(m) === scope && Array.isArray(m.embedding))
+      .filter(
+        (m) =>
+          m.status === "active" &&
+          !isExpired(m.expiresAt, nowMs) &&
+          memScope(m) === scope &&
+          Array.isArray(m.embedding),
+      )
       .map((m) => ({ memory: m, similarity: cosineSimilarity(vec, m.embedding as number[]) }))
       .filter((x) => x.similarity >= floor)
       .sort((a, b) => b.similarity - a.similarity);
