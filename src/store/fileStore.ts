@@ -12,6 +12,7 @@ import type {
 } from "./types.js";
 import { CURRENT_SCHEMA_VERSION, migrate, type StoreFile } from "./schema.js";
 import { normalizeScope } from "./scope.js";
+import { normalizeSubject } from "../gate/subject.js";
 import {
   computeExpiresAt,
   isCompactable,
@@ -54,6 +55,14 @@ function normalizeId(raw: string): string {
  *  to an absent input, so an un-migrated record and a default save always compare equal. */
 function memScope(m: Memory): string {
   return normalizeScope(m.scope);
+}
+
+/** The canonical subject key of a stored memory (D-052). Applied on READ as well as on write
+ *  so a record saved before the separators were folded — `location.city` from an agent that
+ *  followed the old dotted advice — still matches a `location-city` candidate and supersedes
+ *  properly, with no migration and no rewrite of existing data. */
+function memSubject(m: Memory): string | undefined {
+  return normalizeSubject(m.subject);
 }
 
 /** How much we trust a memory by where it came from. A lower-trust source must not
@@ -211,7 +220,10 @@ export class FileStore implements MemoryStore {
       id: randomUUID(),
       text: input.text.trim(),
       type: input.type,
-      subject: input.subject?.trim().toLowerCase() || undefined,
+      // Canonical hyphenated subject key (D-052). Folding `.`/`_`/space to `-` here — at the
+      // one boundary every save passes through — is what stops a caller's spelling of the
+      // separator from silently creating a second live fact instead of superseding the first.
+      subject: normalizeSubject(input.subject),
       // The namespace this memory lives in (D-048). Normalized so an absent/empty scope
       // becomes the default — reproducing today's single-tenant behaviour exactly.
       scope: normalizeScope(input.scope),
@@ -268,10 +280,16 @@ export class FileStore implements MemoryStore {
     );
     if (existing) return { action: "duplicate", memory: existing };
 
+    // Same treatment for the subject as for the scope above (D-052): canonicalize once, stamp
+    // it back, then compare canonical-to-canonical so a legacy record's separator spelling
+    // cannot hide a supersession. An imported record is normalized here too, which is the only
+    // place `importBatch` would otherwise bypass.
+    candidate.subject = normalizeSubject(candidate.subject);
+
     let retired: Memory[] = [];
     if (candidate.subject) {
       const matches = memories.filter(
-        (m) => m.status === "active" && memScope(m) === scope && m.subject === candidate.subject,
+        (m) => m.status === "active" && memScope(m) === scope && memSubject(m) === candidate.subject,
       );
       if (matches.length > 0) {
         const maxTrust = Math.max(...matches.map((m) => TRUST[m.source]));

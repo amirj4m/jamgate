@@ -1076,3 +1076,40 @@ every response produced before routing or after it fails must still pick its sha
 because that is exactly where the handler that knows the protocol is not in the stack.
 (2) A public response is a projection of the internal record, never the record itself; ship
 what the caller can act on.
+
+### D-052 — One subject convention: lowercase and hyphenated, with the separators folded
+
+Two documents disagreed about how to spell a subject, and because subject equality is what
+drives supersession (RULES §2.3), the disagreement was not cosmetic — it produced exactly the
+outcome RULES §10 forbids.
+
+`skills/memory-discipline/SKILL.md` §3 told agents to pass **dotted** subjects
+(`editor.theme`, `location.city`). `deriveSubject` emits **hyphenated** ones
+(`operating-system`, `location`), as do the `save_memory` tool description, the README, and
+D-027 / D-036 / D-040. Validating 0.10.0 walked the two conventions into each other:
+
+```
+save_memory { text: "jam lives in Athens, Greece" }                          → subject "location"   (derived)
+save_memory { text: "jam lives in Rotterdam", subject: "location.city" }     → subject "location.city"
+recall → BOTH still active. Two live, contradicting answers to "where does jam live".
+```
+
+**Decision — hyphenated is the convention.** Not by taste: it is what the code emits, what the
+tool advertises, and what is already on disk in every existing store, including production.
+Switching the code to dots would orphan every stored subject and silently break supersession
+for the entire existing memory. SKILL.md was the outlier and is now corrected (and gained the
+`scope` guidance it never had, which 0.10.0 made necessary).
+
+**And the separators fold.** `.`, `_` and whitespace all normalize to `-` at the one boundary
+every save passes through, and stored subjects are canonicalized on READ as well as on write —
+so a legacy record spelled `location.city` is still retired by a `location-city` candidate,
+with no migration and no rewrite of existing data.
+
+The fold deliberately stops there: `location.city` still does not equal `location`. Those are
+different subjects under any convention, and inferring that one subsumes the other is the
+wrong-supersession risk D-027 exists to refuse — a bad guess retires a fact the user never
+asked to retire.
+
+**The general rule this encodes:** when a value is a JOIN KEY, its spelling is part of the
+schema, not documentation. Exactly one document may define it, everything else cites that
+one, and the code normalizes at a single boundary so a caller's spelling cannot fork the data.

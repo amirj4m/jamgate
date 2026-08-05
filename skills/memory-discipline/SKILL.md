@@ -1,6 +1,6 @@
 ---
 name: memory-discipline
-description: Work well with a shared Jamgate memory. Recall before answering anything about the user or their projects; save granular, standalone, durable facts one at a time, each with a specific dotted subject; never store secrets or transient chatter; and treat the gate's verdicts (duplicate, rejected, possible_duplicate) as correct answers, not errors to retry.
+description: Work well with a shared Jamgate memory. Recall before answering anything about the user or their projects; save granular, standalone, durable facts one at a time, each with a specific hyphenated subject; never store secrets or transient chatter; and treat the gate's verdicts (duplicate, rejected, possible_duplicate) as correct answers, not errors to retry.
 ---
 
 # Memory discipline (Jamgate)
@@ -33,27 +33,36 @@ it un-supersedable).
 - ❌ `save_memory { text: "jam lives in Athens, uses Linux, is building Jamgate, prefers dark themes, banks with..." }`
 - ✅ four separate saves, each with its own subject (below).
 
-## 3. Always pass a specific `subject`
+## 3. Always pass a specific `subject` — lowercase and hyphenated
 
-`subject` is dotted lowercase describing what the fact is about
-(`editor.theme`, `location.city`, `project.jamgate.status`, `laptop.savings`).
-**Subject equality drives time-aware supersession**: a new memory with the same
-subject replaces the old one. So:
+`subject` is a **lowercase, hyphen-separated** key describing what the fact is about
+(`editor-theme`, `location`, `jamgate-status`, `thinkbook-savings`). Hyphens are the
+convention everywhere: it is what the gate derives when you omit the field, what the
+tool description advertises, and what is already stored. **Do not use dots or
+underscores** — the gate folds them to hyphens so you land on the same key either way,
+but write the canonical form.
+
+**Subject equality drives time-aware supersession**: a new memory with the same subject
+replaces the old one. So:
 
 - **Updating a tracked value** (a status, a balance, a current choice, a progress
   figure) → reuse the **exact same subject string** the earlier memory used, with new
-  text. Different spelling reads as a different topic and both stay active.
+  text. A different key reads as a different topic and both stay active.
 - If you omit `subject`, the gate derives a best-effort one and declines on long or
   multi-topic text — so passing it yourself is always better.
 
 ```
-save_memory { text: "jam's ThinkBook savings: 5/10, €640", subject: "laptop.thinkbook.savings" }
+save_memory { text: "jam's ThinkBook savings: 5/10, €640", subject: "thinkbook-savings" }
 // later, same counter, new value → SAME subject:
-save_memory { text: "jam's ThinkBook savings: 7/10, €768", subject: "laptop.thinkbook.savings" }
+save_memory { text: "jam's ThinkBook savings: 7/10, €768", subject: "thinkbook-savings" }
 ```
 
-- ❌ updating status under `project.status.new` when the old one was `project.status` → two live facts.
-- ✅ reuse `project.status` verbatim → the old one is retired.
+- ❌ updating under `jamgate-status-new` when the old one was `jamgate-status` → two live facts.
+- ✅ reuse `jamgate-status` verbatim → the old one is retired.
+
+A subject is a **flat key, not a path**. `location` and `location-city` are two different
+subjects, so one will never retire the other — pick the key the fact already lives under
+(recall first if you are unsure) rather than a more specific-sounding variant.
 
 ## 4. Choose `type` honestly
 
@@ -84,7 +93,7 @@ move is to **never send them in the first place.** A secret in a shared memory f
 to every session and device.
 
 - ❌ `save_memory { text: "jam's OpenAI key is sk-abc123..." }`
-- ✅ `save_memory { text: "jam stores API keys in 1Password", subject: "tools.secrets-manager" }`
+- ✅ `save_memory { text: "jam stores API keys in 1Password", subject: "secrets-manager" }`
 
 ## 7. Respect gate verdicts — they are answers, not failures
 
@@ -104,6 +113,20 @@ delete, pass that id **exactly** (or an unambiguous prefix of **8+ characters**)
 ```
 forget_memory { id: "3f9a8c2e" }   // 8-char prefix is enough
 ```
+
+## 9. `scope` — only if the user keeps separate namespaces
+
+All three tools take an optional `scope`. Omitting it uses the single default namespace,
+which is the normal case — **omit it unless the user has told you a scope to use.**
+
+A scope is a hard wall, not a label: the gate (dedup, supersession, conflict, near-duplicate),
+recall and forget all run strictly inside one scope. Two scopes can hold flatly contradictory
+facts and neither will retire the other, and an id from one scope cannot be recalled or
+deleted from another — a `forget_memory` with the right id and the wrong scope just says the
+memory does not exist.
+
+- Use the **same scope you recalled the id from** when forgetting.
+- Guessing a scope silently splits the user's memory in two. If you are unsure, don't pass one.
 
 ---
 

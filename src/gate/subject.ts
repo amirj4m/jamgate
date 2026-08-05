@@ -16,6 +16,37 @@
 //      noun phrase as the subject ("my favorite color is blue" → "favorite-color").
 // The output is a lowercase, hyphenated key, matching the convention used elsewhere.
 
+/**
+ * Canonicalize a subject key (D-052).
+ *
+ * The convention is **lowercase, hyphen-separated**: `operating-system`, `location`,
+ * `current-project`. That is what `deriveSubject` emits, what the `save_memory` tool
+ * description advertises, what D-027/D-036/D-040 use, and — decisively — what is already on
+ * disk in every existing store. It is the convention, and callers should use it.
+ *
+ * But subject equality is what drives supersession (RULES §2.3), so a caller who writes the
+ * same key with a different separator does not get a near-miss — they get a second live fact
+ * contradicting the first, silently. Validating 0.10.0 caught exactly that: the
+ * memory-discipline skill told agents to use DOTTED subjects (`location.city`) while the gate
+ * derived hyphenated ones, and two contradictory "where jam lives" memories sat side by side,
+ * which RULES §10 forbids outright.
+ *
+ * So the separators fold: `.`, `_` and whitespace all become `-`, and runs collapse. That
+ * makes `editor.theme`, `editor_theme` and `Editor Theme` one key, so the two conventions can
+ * no longer drift apart on the same subject. It deliberately does NOT make `location.city`
+ * equal `location` — those are different subjects under any convention, and guessing that one
+ * subsumes the other is precisely the wrong-supersession risk this module refuses to take.
+ */
+export function normalizeSubject(subject?: string | null): string | undefined {
+  const s = (subject ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s._]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return s === "" ? undefined : s;
+}
+
 /** Longest text we will guess a subject for. A one-fact memory ("jam now lives in Athens")
  *  is well under this; a pasted profile or financial model is far over it. Auto-derivation
  *  is the only thing gated by this — an agent-supplied `subject` is always honoured. */

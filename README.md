@@ -234,7 +234,8 @@ Restart the agent. It now has three tools:
 - **`save_memory`** — store a durable fact. The gate rejects junk, drops exact
   duplicates, supersedes outdated facts by recency (pass a `subject` like
   `operating-system` so a newer fact retires the older one — or let the gate derive one),
-  and refers trust conflicts back to you.
+  and refers trust conflicts back to you. Subjects are **lowercase and hyphenated**; dots,
+  underscores and spaces fold to hyphens, so `editor.theme` and `editor-theme` are one key.
 - **`recall_memory`** — fetch what's known, relevant to a query (active facts only).
 - **`forget_memory`** — delete a memory by the id `recall_memory` printed (the full id, or an
   unambiguous prefix of 8+ characters).
