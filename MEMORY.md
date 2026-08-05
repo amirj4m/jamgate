@@ -4,6 +4,50 @@ Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
 
+> ### ✅ PRE-LAUNCH HARDENING — 0.11.0 IS PUBLIC (2026-08-05)
+>
+> npm `latest` = **0.11.0**, the droplet runs **0.11.0**, the MCP registry is current, and
+> v0.10.3 / v0.10.4 / v0.10.5 / v0.11.0 each have a GitHub Release with the `.mcpb` attached.
+> **491 tests.** Four releases in one session, all from the hardening pass below.
+>
+> **Why it happened:** jam asked one question before promoting Jamgate publicly — *"will this
+> embarrass us?"* Four things would have.
+>
+> 1. **Semantic recall was tuned on guesses and the README advertised the failure (D-063,
+>    0.10.3).** Measured against the real model: the floor moves 0.50 → **0.35** (the README's
+>    own "automobile" ≈ car example scores 0.422), and the blend flips from 0.6·semantic to
+>    **0.3·semantic / 0.7·lexical** — the semantic-led blend ranked *worse than no embeddings
+>    at all* (top-1 6/17 vs 8/17); it is now 10/17. **Installing the optional dependency used
+>    to make recall measurably worse.**
+> 2. **Every README claim audited against the running server (0.10.4).** 16 behavioural claims
+>    verified end-to-end over MCP; all 16 held. Corrected: "makes no network calls" (the model
+>    downloads from HF), store-agnosticism (a **seam**, not a feature — no adapter exists and a
+>    user cannot point Jamgate at their own store; RULES §0/§1 and AGENTS.md now say so), the
+>    test count (413 vs an actual 463), the comparison table's provenance, "70+ agents" (17
+>    observed), and `jamgate expired` was undocumented.
+> 3. **The first five minutes had never been tested by anyone but jam (D-064, 0.10.5).** Cold:
+>    fresh HOME, empty npm cache, published package, Node 18 and 22. The **install path held
+>    up completely** — including `npx jamgate` on an empty cache, which does NOT hang. But
+>    `jamgate --help` *started an MCP server and appeared to hang*, a typo did the same,
+>    `setup` told a user with no client to "restart your client(s)", and the default install
+>    logged a 3-line diagnostic that reads as an error at every startup. All fixed.
+> 4. **🔴 Memory did not work in any non-Latin script — at all (D-065, 0.11.0).** The tokenizer
+>    split on `/[^a-z0-9]+/`, which *deletes* non-ASCII. **jam's own Persian memories had been
+>    unrecallable since the day they were saved.** The same assumption had infected three
+>    layers: the recall tokenizer; the junk filter's word count (Chinese/Japanese have no
+>    spaces → "fewer than two meaningful words" → **the gate refused those saves outright**);
+>    and the English embedding model, whose similarity on other scripts degenerates into
+>    *"is this the same script"* ("bicycle" in Greek scored **0.62** against an unrelated Greek
+>    memory — above the floor, and above a true match at 0.27). Fixed at all three layers; ten
+>    languages asserted in tests; English tokenization byte-identical. **Verified live:** the
+>    Persian LPIC-1 memory jam saved on 2026-07-31 now recalls from the droplet through a real
+>    Claude Code MCP call. Also added: a 32 KB cap on one memory (there was none — 200 KB was
+>    accepted silently), an actionable error for a corrupt/unreadable store (it used to be a
+>    bare JSON parse error, with no path and no reassurance the data survived), and prompt
+>    injection named in the README's honest limits.
+>
+> **Production: 66 records, store backed up to `memory.json.pre-0.11.0.bak` before the upgrade.**
+
 > ### ✅ SHIPPED AND UNIFIED — 2026-08-05
 >
 > **0.10.0 and 0.10.1 are public.** npm `latest` = **0.10.1**, the droplet runs **0.10.1**, the
