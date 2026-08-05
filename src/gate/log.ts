@@ -24,7 +24,10 @@ export type GateDecision =
   | "superseded"
   | "conflict"
   | "possible_duplicate"
-  | "rejected";
+  | "rejected"
+  /** A stored memory was deleted (D-056). The corpus has to carry reversals, not just
+   *  acceptances, or the classifier trained on it learns only what got in. */
+  | "forgotten";
 
 export interface GateLogEntry {
   decision: GateDecision;
