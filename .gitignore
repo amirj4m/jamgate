@@ -5,3 +5,6 @@ dist/
 .claude/
 dist-test/
 build/
+
+# The MCP registry publisher binary — a ~20 MB downloaded tool, never a source artifact.
+mcp-publisher
