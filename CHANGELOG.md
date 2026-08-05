@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-08-05
+
+The first-run path, tested cold for the first time by anyone other than the maintainer: a
+fresh `HOME`, an empty npm cache, no `~/.jamgate`, no client config, installing the published
+package rather than the local build, on Node 18 as well as 22 (D-064).
+
+The install path itself held up — `--dry-run` wrote nothing, five clients were wired in
+exactly the documented entry shapes, a pre-existing server in VS Code's `mcp.json` survived
+with a backup written, a `//`-commented Zed config was refused rather than clobbered, a second
+run changed zero bytes, and an MCP client spawning `npx jamgate` on a completely empty npm
+cache completes the handshake. Every defect found was in the thin layer between a person and
+the product, which is the one layer that had no tests.
+
+### Fixed
+
+- **`jamgate --help` started an MCP server instead of printing help.** `--help`, `-h`,
+  `--version` and `-v` all fell through to the default branch, which opens a stdio transport
+  and then waits forever for JSON-RPC — so the most predictable first command a new user types
+  looked exactly like a hang. There is now a real usage screen covering every command, flag
+  and environment variable, and `--version` prints the bare version. Every *sub*command already
+  had its own `--help`; only the front door did not.
+- **A mistyped subcommand did the same thing.** `jamgate setpu` silently became a stdio server.
+  An unrecognised command is now an error naming the valid commands, exiting 1.
+- **`setup` told users with no MCP client to "restart your client(s)".** On a machine where
+  nothing was detected it printed ten "not found" lines and then instructed the user to restart
+  software they do not have. It now says plainly that nothing was detected, that Jamgate itself
+  is fine, and what to do — including the non-obvious cause: a client that has been installed
+  but never launched has not written its config yet, so it cannot be detected.
+- **The normal install logged what read as an error, at every startup.** With the optional
+  embedding package absent — the default, and correct — the loader printed a three-line
+  diagnostic naming a missing package and a file path under the word "cause:", which users see
+  in their client's MCP log and reasonably read as a broken server. It is now one calm line:
+  what is off, how to turn it on, and that nothing is broken. The loud diagnostic is kept for
+  the case that is genuinely a fault (package installed, model failed to load), and the
+  redundant second "running on fuzzy recall" line is gone.
+
+### Documentation
+
+- README notes that finding no clients is normal on a machine where the client has never been
+  launched, and points at `jamgate --help`.
+
 ## [0.10.4] - 2026-08-05
 
 Every claim in the README was checked against the running server before this release — the

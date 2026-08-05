@@ -76,23 +76,29 @@ export async function loadTransformersEmbedder(
     // it. A missing peer dependency and a blocked model download need different fixes.
     const message = (err as Error)?.message ?? String(err);
     const missingPackage = /Cannot find (package|module)/i.test(message);
+    if (missingPackage) {
+      // The overwhelmingly common case, and NOT a fault: the optional peer is optional, so on
+      // a default install it is absent by design. This used to print a three-line diagnostic
+      // with a stack-ish "Cannot find package … imported from /path/to/embedder.js" and the
+      // word "cause:", at every single startup. Users read their client's MCP log, saw that,
+      // and reasonably concluded the server was broken — for a feature they never asked for.
+      // One calm line that says what is off and how to turn it on. The loud diagnostic below
+      // is reserved for the case that IS a fault: the package is installed and still failed.
+      console.error(
+        "jamgate: semantic recall off (optional). Recall uses fuzzy matching; " +
+          "`npm install @huggingface/transformers` to add synonym matching. Nothing is broken.",
+      );
+      return null;
+    }
     console.error(
       `jamgate: optional embeddings unavailable, falling back to fuzzy recall — ${message}`,
     );
-    if (missingPackage) {
-      console.error(
-        "jamgate:   cause: the optional peer '@huggingface/transformers' is not installed. " +
-          "Semantic near-duplicate detection and synonym recall are OFF until it is. " +
-          "Install it alongside jamgate to enable them.",
-      );
-    } else {
-      console.error(
-        `jamgate:   cause: '${MODEL_ID}' could not be loaded. The model is downloaded on ` +
-          "first use and cached inside the package directory — a sandboxed service (systemd " +
-          "ProtectSystem/ProtectHome) may be unable to write that cache or reach the network. " +
-          "Pre-download the model as the service user, or point HF_HOME at a writable path.",
-      );
-    }
+    console.error(
+      `jamgate:   cause: '${MODEL_ID}' could not be loaded. The model is downloaded on ` +
+        "first use and cached inside the package directory — a sandboxed service (systemd " +
+        "ProtectSystem/ProtectHome) may be unable to write that cache or reach the network. " +
+        "Pre-download the model as the service user, or point HF_HOME at a writable path.",
+    );
     return null;
   }
 }

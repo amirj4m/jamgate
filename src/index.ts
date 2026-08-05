@@ -375,8 +375,12 @@ async function expiredFooter(store: MemoryStore, scope?: string): Promise<string
 async function buildStore(): Promise<FileStore> {
   // Loading is lazy and best-effort so the base install and offline/CI runs work unchanged.
   const embedder = await loadTransformersEmbedder();
+  // Only announce the GOOD case here. The loader already explains every way the semantic layer
+  // can be absent, and it can distinguish "optional package not installed" (normal, one calm
+  // line) from "installed but failed to load" (a real fault worth a diagnostic). A second
+  // unconditional "running on fuzzy recall" line on top of that just doubled the noise a new
+  // user sees in their client's MCP log on every single startup.
   if (embedder) console.error(`jamgate: semantic embeddings active (${embedder.id})`);
-  else console.error("jamgate: running on fuzzy recall (no embedding model loaded)");
 
   // Depend on the adapter contract, not a concrete backend (D-019).
   return new FileStore(undefined, {
@@ -385,8 +389,62 @@ async function buildStore(): Promise<FileStore> {
   });
 }
 
+/**
+ * Usage text for `jamgate --help`.
+ *
+ * This existed nowhere until 0.10.5, and its absence had a specific cost: `jamgate --help`,
+ * `-h`, `--version` and `-v` all fell through to the default branch and started an MCP stdio
+ * server. A server on stdio prints one line to stderr and then waits silently for JSON-RPC
+ * that a human is never going to type — so the first command a new user runs appeared to hang.
+ * Every subcommand already had its own `--help`; only the front door did not.
+ */
+const USAGE = `jamgate ${VERSION} — a neutral memory quality-gate for AI agents
+
+  A gate, not a store. One shared memory of you that every MCP-capable agent reads
+  from and writes to, kept honest at write time. Runs locally; your memory stays on
+  your machine.
+
+USAGE
+  jamgate                        Run the MCP server on stdio. This is what your AI client
+                                 launches — it speaks JSON-RPC, not a human interface.
+  jamgate --http                 Run in remote mode over HTTP (requires JAMGATE_TOKEN).
+
+  jamgate setup                  Detect installed MCP clients and wire jamgate into each.
+  jamgate status                 Show which clients are wired, and where the store lives.
+  jamgate export                 Write the memory store out as JSON.
+  jamgate import <file>          Merge a JSON export back in, through the gate.
+  jamgate expired                List memories that have aged out of recall.
+
+  Every subcommand takes --help of its own, e.g. \`jamgate setup --help\`.
+
+FIRST TIME?
+  npx jamgate setup              …then restart your client. That is the whole install.
+
+OPTIONS
+  -h, --help                     Show this help.
+  -v, --version                  Print the version.
+  --port <n>                     Port for --http (default 8420).
+
+ENVIRONMENT
+  JAMGATE_STORE                  Store path (default ~/.jamgate/memory.json).
+  JAMGATE_TOKEN                  Bearer token, required by --http.
+  JAMGATE_EMBEDDINGS=off         Disable the optional local semantic layer.
+
+  Full documentation: https://github.com/amirj4m/jamgate`;
+
 async function main() {
   const argv = process.argv.slice(2);
+
+  // A human at a terminal reaches for --help and --version first. Answer them before
+  // anything else, and never let them fall through to "start a silent stdio server".
+  if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+    console.log(USAGE);
+    return;
+  }
+  if (argv[0] === "--version" || argv[0] === "-v" || argv[0] === "version") {
+    console.log(VERSION);
+    return;
+  }
 
   // Install-helper subcommands run before any store/server bootstrap — they only touch client
   // config files, never the memory store or a transport (the One-Click Install phase, D-030).
@@ -411,6 +469,19 @@ async function main() {
   // Expiry visibility (D-055): report what recall is hiding. Read-only, like status/export.
   if (argv[0] === "expired") {
     process.exitCode = await expiredCommand(argv.slice(1));
+    return;
+  }
+
+  // A mistyped subcommand (`jamgate setpu`, `jamgate improt`) used to fall through to "start a
+  // silent stdio server" — the same invisible failure as --help, reached by an even more likely
+  // route. A bare word we do not recognise is an error, not a request to serve.
+  if (argv[0] && !argv[0].startsWith("-")) {
+    console.error(
+      `jamgate: unknown command "${argv[0]}".\n` +
+        "  Commands: setup, status, export, import, expired.\n" +
+        "  Run `jamgate --help` for usage, or plain `jamgate` to start the MCP server on stdio.",
+    );
+    process.exitCode = 1;
     return;
   }
 

@@ -188,6 +188,22 @@ export function formatSetupReport(results: ClientResult[], opts: { dryRun: boole
       `  ${configured.length} client(s) would change, ${already.length} already configured. ` +
         "Re-run without --dry-run to apply.",
     );
+  } else if (configured.length === 0 && already.length === 0) {
+    // Nothing detected, nothing wired. The old summary said "Done: 0 configured … restart your
+    // client(s)" — instructing someone to restart clients that are not installed, which is the
+    // least useful thing to say to the one user who most needs telling what to do. This is the
+    // normal outcome on a machine where the MCP client exists but has never been launched (so
+    // its config directory does not exist yet), which is exactly a first install.
+    lines.push("  No MCP client was detected on this machine, so nothing was configured.");
+    lines.push("");
+    lines.push("  Jamgate itself is fine — it has nothing to plug into yet. Either:");
+    lines.push("    • install and launch an MCP client once (Claude Code, Claude Desktop, Cursor,");
+    lines.push("      Windsurf, Gemini CLI, VS Code, Cline, Roo Code, OpenCode, Zed), then re-run");
+    lines.push("      this command — a client that has never been started has no config yet;");
+    lines.push("    • or wire it by hand: see \"Option B — per-client manual\" in the README,");
+    lines.push("      https://github.com/amirj4m/jamgate#option-b--per-client-manual");
+    lines.push("");
+    lines.push("  Check what it found with: jamgate status");
   } else {
     lines.push(
       `  Done: ${configured.length} configured, ${already.length} already configured. ` +

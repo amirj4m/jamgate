@@ -1477,3 +1477,57 @@ better guess.
 a guess wearing a lab coat, and the comment is what stops anyone from checking. When a number
 decides whether a feature fires at all, the cost of measuring it once is an afternoon and the
 cost of not measuring it is shipping a documented example that does not run.
+
+### D-064 — The first five minutes had never been tested by anyone but the maintainer
+
+Jamgate had shipped seventeen releases, supported ten agents, and been installed exactly once
+— on the machine that built it, with a warm npm cache, an existing config, and the author
+present to interpret anything odd. So the whole first-run path was untested in the only
+condition that matters for a launch: a stranger, cold.
+
+It was tested properly before going public — a fresh `HOME`, an empty npm cache, no
+`~/.jamgate`, no client config, installing the **published** package rather than the local
+build, on Node 18 as well as 22. Most of it held up, and the parts that did not were not in
+the gate at all.
+
+**What held.** The install path is genuinely solid, and this is worth recording because it is
+where the risk was assumed to be: `--dry-run` wrote nothing; setup wired five simulated
+clients in exactly the entry shapes the README documents; a pre-existing `github` server in
+VS Code's `mcp.json` survived untouched and a backup was written; a `//`-commented Zed
+`settings.json` was correctly refused rather than clobbered; a second run changed zero bytes;
+`jamgate status` reported the truth. Crucially, an MCP client spawning `npx jamgate` on a
+**completely empty npm cache** completes the handshake — npm installs without prompting when
+stdin is not a TTY, so the obvious cold-start hang does not happen. And the server ran
+correctly on Node 18 (stdio and HTTP) despite `engines` demanding 20+.
+
+**What did not.** Three failures, all in the same place: the product answered machines
+correctly and humans not at all.
+
+1. **`jamgate --help` started an MCP server.** `--help`, `-h`, `--version` and `-v` all fell
+   through to the default branch, which opens a stdio transport, prints one line to stderr and
+   waits forever for JSON-RPC. The single most likely first command a person types produced
+   what looks exactly like a hang. Every *sub*command had its own `--help`; only the front
+   door did not. A mistyped subcommand (`jamgate setpu`) did the same thing.
+
+2. **`setup` told a user with no MCP client to "restart your client(s)".** On a machine where
+   nothing was detected, it printed ten "not found" lines and then instructed the user to
+   restart software they do not have. This is not an exotic case — a client that has been
+   installed but never launched has written no config yet, so it is invisible to detection.
+   The one user who most needs to be told what to do next was told the least useful thing
+   available.
+
+3. **The normal install logged what looked like an error, on every startup.** With the
+   optional embedding package absent — which is the default, and correct — the loader printed
+   a three-line diagnostic naming a missing package and a file path under the word "cause:".
+   Users read that in their client's MCP log and conclude the server is broken, for a feature
+   they never asked for. It now prints one calm line saying semantic recall is off, how to turn
+   it on, and that nothing is broken. The loud diagnostic is reserved for the case that is
+   actually a fault: the package installed but failing to load.
+
+**The general rule this encodes:** a maintainer cannot find these bugs by using their own
+product, because the maintainer never runs `--help` on software they wrote, never has an
+empty config, and reads a stack trace in a log as information rather than as alarm. The
+first-run path has to be *simulated adversarially* — new HOME, cold cache, published artifact,
+no client installed, and a wrong command typed on purpose — or it ships untested. Note where
+the three defects landed: not one was in the gate, the part that had 463 tests. They were all
+in the thin layer between a person and the product, which had none.

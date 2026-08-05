@@ -56,4 +56,50 @@ describe("built binary entrypoint (0.4.0 silent-exit regression)", () => {
     assert.ok(stdout.trim().length > 0, "status produced no stdout");
     assert.match(stdout, /jamgate status/);
   });
+
+  /**
+   * The first command a new user types. Before 0.10.5 `--help`, `-h`, `--version` and `-v`
+   * all fell through to the default branch and started an MCP stdio server, which prints one
+   * line to stderr and then waits forever for JSON-RPC nobody is going to type — so the CLI
+   * appeared to hang on its most predictable input. These run with a HARD timeout: a
+   * regression here is a hang, and a hang must fail the suite rather than stall it.
+   */
+  for (const flag of ["--help", "-h", "help"]) {
+    it(`answers ${flag} instead of starting a silent server`, async () => {
+      const link = await symlinkedBin();
+      const { stdout } = await execFileAsync(process.execPath, [link, flag], {
+        env: { ...process.env, HOME: await fs.mkdtemp(join(tmpdir(), "jamgate-home-")) },
+        timeout: 10_000,
+      });
+      assert.match(stdout, /USAGE/);
+      assert.match(stdout, /jamgate setup/);
+      assert.ok(!/running on stdio/.test(stdout), "help must not start the server");
+    });
+  }
+
+  for (const flag of ["--version", "-v", "version"]) {
+    it(`prints the bare version for ${flag}`, async () => {
+      const link = await symlinkedBin();
+      const { stdout } = await execFileAsync(process.execPath, [link, flag], {
+        env: { ...process.env, HOME: await fs.mkdtemp(join(tmpdir(), "jamgate-home-")) },
+        timeout: 10_000,
+      });
+      assert.match(stdout.trim(), /^\d+\.\d+\.\d+$/);
+    });
+  }
+
+  it("rejects a mistyped subcommand instead of serving on stdio", async () => {
+    const link = await symlinkedBin();
+    await assert.rejects(
+      execFileAsync(process.execPath, [link, "setpu"], {
+        env: { ...process.env, HOME: await fs.mkdtemp(join(tmpdir(), "jamgate-home-")) },
+        timeout: 10_000,
+      }),
+      (err: NodeJS.ErrnoException & { code?: number; stderr?: string }) => {
+        assert.equal(err.code, 1, "a typo must exit nonzero, not start a server");
+        assert.match(err.stderr ?? "", /unknown command "setpu"/);
+        return true;
+      },
+    );
+  });
 });

@@ -110,7 +110,12 @@ npx jamgate setup --dry-run                          # show what would change, w
 npx jamgate setup --remote https://you/mcp --token … # wire HTTP transport (see Remote mode)
 npx jamgate setup --force                             # overwrite even a remote wiring with local stdio
 npx jamgate status                                    # show which clients are wired + where the store lives
+npx jamgate --help                                    # every command and environment variable
 ```
+
+If `setup` finds no clients, that is normal on a machine where the client has been installed
+but never launched — a client writes its config on first run. Start it once, then re-run
+`npx jamgate setup`.
 
 Restart your client(s) afterwards. On Claude Code, when the `claude` CLI is present, setup
 uses `claude mcp add` under the hood; otherwise it merges `~/.claude.json` directly.
