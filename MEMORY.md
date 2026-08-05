@@ -4,25 +4,49 @@ Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
 
-> ### ⚠ READ FIRST — the memory is split across TWO live stores (2026-08-05)
+> ### ✅ SHIPPED AND UNIFIED — 2026-08-05
 >
-> | | production | this laptop |
-> |---|---|---|
-> | path | `142.93.102.10:/var/lib/jamgate/memory.json` (`memory.amirj4m.com`, jamgate **0.9.2**) | `~/.jamgate/memory.json` (local stdio) |
-> | records | **53** (39 active, **39 recallable — 0 expired**) | **11** (8 active) |
-> | last write | **2026-07-27T18:28Z — frozen for 9 days** | **2026-08-05**, still being written today |
-> | writers | `claude-code`, `Anthropic/ClaudeAI` | `local-agent-mode-jamgate` |
+> **0.10.0 and 0.10.1 are public.** npm `latest` = **0.10.1**, the droplet runs **0.10.1**, the
+> MCP registry entry is current, and every tagged version from v0.1.0 to v0.10.1 now has a
+> GitHub Release with the `.mcpb` bundle attached to the latest.
 >
-> The stored note "Memory unified on remote — local stdio mode retired on this laptop
-> (2026-07-21)" is **contradicted by the gate log**: 12 organic saves landed on the laptop
-> between 2026-07-27 and today, and production has received nothing in that time. Whatever the
-> intent was, jam's memory is fragmented right now — which is exactly the failure D-047 exists
-> to prevent, arrived at by a different route.
+> **The two-store split is resolved: the SERVER is home.** The laptop's 12 records were
+> exported and replayed through the gate into production (`import`, D-033) — the gate accepted
+> all 9 active ones, 0 conflicts, 0 duplicates. Claude Desktop's local stdio entry was removed
+> (backup `~/.config/Claude/claude_desktop_config.json.jamgate-backup-20260805`), so nothing on
+> the laptop is a write target any more. **Verified:** a `save_memory` from Claude Code on the
+> laptop lands on the server and leaves `~/.jamgate/memory.json` untouched.
 >
-> **Not merged, deliberately.** Which set of memories is wanted, and in which direction, is
-> jam's decision, not a cleanup an agent should perform. `jamgate export` / `import` is the
-> tool when he decides (import replays through the gate, D-033).
+> `~/.jamgate/memory.json` (12 records) is now an **inert historical copy** — fully represented
+> upstream. Do not write to it and do not re-point any client at it.
+>
+> **Production: 66 records, 51 active, 0 expired, 51 recallable, 106 logged decisions.**
 
+- **0.10.0 AND 0.10.1 SHIPPED — public on npm, the registry, and the droplet (2026-08-05;
+  D-060, D-061).** Tagged `v0.10.0` at `2680fa4`, the end of the validation phase, deliberately
+  **excluding the parallel classifier session's commits** — the 0.10.0 changelog describes
+  namespaces + REST + the audit fixes and says nothing about a classifier, so tagging HEAD
+  would have published a release contradicting its own notes.
+  - **npm**: 0.10.0 then 0.10.1, both via `publish.yml` with provenance. `latest` = 0.10.1.
+  - **GitHub Releases**: v0.10.0 and v0.10.1 cut with the `.mcpb` attached, and **v0.6.0
+    through v0.9.2 backfilled** — releases had been missing since v0.5.0, so the README's
+    "latest release" link had been serving every new Claude Desktop user a five-versions-stale
+    bundle. Verified by downloading it: the bundle now reports 0.10.1.
+  - **Droplet**: nginx gained the `location /v1/` block (D-053) — `/v1/memory` now answers
+    Jamgate's 401 instead of nginx's 404 — then upgraded 0.9.2 → 0.10.0 → 0.10.1.
+    **19/19 live RULES §9 checks pass** against `memory.amirj4m.com`.
+  - **MCP registry** (pending since Phase 4) is now **automatic**: the release workflow uses
+    `mcp-publisher login github-oidc`, which needs no secret and no device flow. Entry is live
+    at 0.10.1.
+  - **Sweep:** the four records the old D-040 bug collapsed onto subject `location` were
+    re-asserted through the live gate with correct distinct subjects — the fuller asylum record
+    superseded the thinner one by recency, and the accounting fact stands on its own again. Ten
+    of the thirteen subject-less records were given subjects read off their own text (no
+    collisions; texts unchanged). **Three were deliberately left alone** — they are explicitly
+    multi-topic, and one subject on a blend lets an unrelated future save retire the whole
+    thing; splitting them is classifier work, not repair.
+  - **Remaining known gap:** `mcpservers.org` needs a web form submission and PulseMCP needs a
+    listing claim — both are browser-only and cannot be done from here.
 - **DOGFOODING AUDIT of the real gate logs — the release gate that 0.10.0 did NOT clear
   (2026-08-05; D-054…D-056).** Read both real decision logs: production
   (`/var/lib/jamgate/gate.log`, 76 lines, 2026-07-21 → 2026-07-27, pulled read-only over SSH)
