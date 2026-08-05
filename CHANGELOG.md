@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+*Found by validating 0.10.0 against a real MCP client and a real HTTP client before release;
+0.10.0 has not been published, so these land with it.*
+
+- **A password stated as "the password for X is Y" is now refused** (D-050). The gate caught
+  `jam's mysql password is …` but stored the more natural `the password for jam's mysql
+  database is …` — the same fact, one preposition apart — on both the MCP and REST paths. A
+  bounded `for`/`to`/`of`/`on` phrase may now sit between the keyword and the separator.
+  "jam's password **manager** is 1Password" and "the password for the wifi **is printed on the
+  router**" still pass, as before.
+- **One subject convention: lowercase and hyphenated** (D-052). The `memory-discipline` skill
+  told agents to pass *dotted* subjects (`location.city`) while the gate derives *hyphenated*
+  ones (`location`) — and since subject equality drives supersession, that produced two live,
+  contradicting memories about the same fact. Hyphens are the convention; `.`, `_` and spaces
+  now fold to `-` on write **and on read**, so a legacy `location.city` record is still retired
+  by a `location-city` save with no migration. `location.city` still does not equal `location`
+  — different subjects stay different.
+- **REST errors answer in the REST envelope** (D-051). `401` (produced by the shared auth gate,
+  before routing) and `404` on an unrouted `/v1/` path were returning JSON-RPC error objects to
+  REST clients, contradicting the documented contract. Both are now `{error, message}`; the MCP
+  endpoint's JSON-RPC errors are unchanged. Forget misses and ambiguous prefixes gained the
+  `message` field the other errors carry, and a miss now **names the scope it searched**.
+- **REST responses no longer ship the embedding vector** (D-051). A one-result recall was
+  8.4 KB, ~8 KB of which was 384 floats. The vector stays on disk and in `export`.
+- **`server.json` was nine releases stale** at `0.1.0` while the package was `0.10.0`. Synced,
+  and now held in lockstep with `package.json` by a test, the same way `src/version.ts` is.
+- **The embedder-loader test no longer assumes the optional peer is absent.** It asserted a flat
+  `null`, which failed on any machine where `@huggingface/transformers` *is* installed — the
+  supported configuration for semantic recall — reading as a regression when nothing had
+  regressed. It now asserts the contract that holds either way.
+
+### Documentation
+
+- **nginx deployments must route `/v1/` explicitly** (D-053). nginx forwards only the paths
+  named in a `location` block, so on a path-scoped deployment the REST API is unreachable and
+  answers nginx's own `404` instead of Jamgate's `401` — verified against a live instance. The
+  README's remote-mode section now carries the full set of required blocks (`/mcp`, `/v1/`, the
+  OAuth paths, `/healthz`) and a one-line check that tells a proxy gap from an auth failure.
+- **Privacy section corrected**: the gate decision log lives **next to the store** (`gate.log`
+  beside `JAMGATE_STORE`) since D-037, not always at `~/.jamgate/gate.log`.
+- The `memory-discipline` skill gained the `scope` guidance it never had, and `DECISIONS.md`
+  now records why D-028 and D-032 are unused numbers.
+
 ## [0.10.0] - 2026-07-23
 
 ### Added
