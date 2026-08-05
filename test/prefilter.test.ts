@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { prefilter } from "../src/gate/prefilter.js";
+import { MAX_TEXT_LENGTH, prefilter } from "../src/gate/prefilter.js";
 
 /** Credential fixtures are assembled at runtime, never committed as a literal — a
  *  credential-shaped string in a source file trips GitHub push protection, and a test
@@ -134,5 +134,40 @@ describe("prefilter (gate layer 1)", () => {
         );
       assert.equal(prefilter(long).ok, true);
     });
+  });
+});
+
+/** D-065: there was no upper bound on a memory at all — a 200 KB save was accepted in
+ *  silence. A memory is one durable fact; a document is an accident worth naming. */
+describe("upper length bound", () => {
+  it("accepts a long but plausible memory", () => {
+    const long = "jam is building Jamgate. " + "It keeps one shared memory clean. ".repeat(50);
+    assert.ok(long.length > 1500 && long.length < MAX_TEXT_LENGTH);
+    assert.equal(prefilter(long).ok, true);
+  });
+
+  it("rejects a document-sized save with an actionable reason", () => {
+    const huge = "jam owns a very long story. " + "x".repeat(MAX_TEXT_LENGTH);
+    const v = prefilter(huge);
+    assert.equal(v.ok, false);
+    assert.match(v.reason ?? "", /too long/);
+    assert.match(v.reason ?? "", new RegExp(String(MAX_TEXT_LENGTH)));
+    assert.match(v.reason ?? "", /one durable fact/);
+  });
+
+  it("keeps an oversized body out of the decision log", () => {
+    // The log is a training buffer, not a dumping ground for whatever an agent pasted.
+    assert.equal(prefilter("x".repeat(MAX_TEXT_LENGTH + 1)).redact, true);
+  });
+
+  it("measures the trimmed length, so surrounding whitespace does not count", () => {
+    // Real prose just under the bound, padded past it with whitespace: the padding must not
+    // be what decides. (A wall of one repeated character is rejected by the placeholder rule
+    // long before length matters, so the fixture has to be plausible text.)
+    const sentence = "jam keeps one shared memory of himself across every agent. ";
+    const body = sentence.repeat(Math.floor((MAX_TEXT_LENGTH - 100) / sentence.length));
+    assert.ok(body.length < MAX_TEXT_LENGTH);
+    assert.equal(prefilter(body).ok, true);
+    assert.equal(prefilter(`   ${body}   `).ok, true, "whitespace padding must not trip the bound");
   });
 });

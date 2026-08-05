@@ -42,12 +42,63 @@ const STOPWORDS = new Set([
   "what", "when", "where", "which", "who", "why", "with", "you", "your",
 ]);
 
-/** Split text into lowercase alphanumeric tokens, punctuation stripped. */
+/**
+ * Fold a string for matching: decompose, drop combining marks, recompose, lowercase.
+ *
+ * This is what makes "café" match "cafe" and "Müller" match "muller". It is applied to the
+ * query and to the memory identically, so the only effect is that more things compare equal —
+ * a query can never be folded out of a match its text would have had.
+ */
+function fold(text: string): string {
+  return text.normalize("NFKD").replace(/\p{M}+/gu, "").normalize("NFC").toLowerCase();
+}
+
+/**
+ * Split text into lowercase tokens, punctuation stripped.
+ *
+ * This split used to be `/[^a-z0-9]+/`, which does not ignore non-ASCII text — it DELETES it.
+ * Every Persian, Greek, Cyrillic, Arabic, Hebrew, Chinese, Japanese and Korean character was
+ * dropped on the floor, so a memory written in any of them tokenized to nothing and could
+ * never be recalled, not even by pasting a word straight out of its own text. Accented Latin
+ * was mangled the same way: "café" became "caf", "Müller" became "m" and "ller". The store
+ * this was found on already held Persian memories that had been unrecallable since the day
+ * they were saved (D-065).
+ *
+ * `\p{L}\p{N}` with the `u` flag keeps a letter or a digit in ANY script.
+ *
+ * Whitespace is not enough on its own, though: Chinese and Japanese are written without it, so
+ * a whole sentence arrives as ONE token and an exact-word query matches nothing (the trigram
+ * scorer cannot help — Dice similarity between a two-character query and a twenty-character
+ * sentence is near zero even when the query is literally inside it). Runs of Han, Hiragana and
+ * Katakana are therefore split into single characters, the standard cheap substitute for a
+ * word segmenter. It over-matches a little on one-character queries; it is the difference
+ * between "recall works" and "recall does not exist" for those languages. Korean is left alone
+ * — it uses spaces, and already tokenizes correctly.
+ */
+const CJK_CLASS = "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}";
+const CJK = new RegExp(`[${CJK_CLASS}]`, "u");
+/** One CJK character, OR a run of non-CJK letters/digits. The negative lookahead is what keeps
+ *  the second branch from swallowing CJK — `\p{L}` matches Han too, so a plain alternation
+ *  would consume "iPhone用のアプリ" whole after the first Latin character. */
+const CJK_SEGMENT = new RegExp(`[${CJK_CLASS}]|(?:(?![${CJK_CLASS}])[\\p{L}\\p{N}])+`, "gu");
+
+/**
+ * Split text into words without folding — the shared notion of "where are the words" for both
+ * recall scoring and the junk filter, which has to count words to decide whether a save is a
+ * statement at all. It is exported because those two must agree: when only the scorer knew how
+ * to segment Chinese, a Chinese memory was *rejected by the gate* for having "fewer than two
+ * meaningful words" and the improved scorer never got to see it (D-065).
+ */
+export function splitWords(text: string): string[] {
+  const tokens = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (!CJK.test(text)) return tokens; // fast path: nothing to segment
+  return tokens.flatMap((t) =>
+    CJK.test(t) ? [...t.matchAll(CJK_SEGMENT)].map((m) => m[0]) : [t],
+  );
+}
+
 export function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
+  return splitWords(fold(text));
 }
 
 /**

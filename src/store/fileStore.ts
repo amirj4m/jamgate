@@ -23,7 +23,7 @@ import {
 } from "./ttl.js";
 import { withFileLock } from "./lock.js";
 import { memoryRelevance, MIN_RELEVANCE } from "../gate/relevance.js";
-import type { Embedder } from "../embeddings/embedder.js";
+import { isModelLanguage, type Embedder } from "../embeddings/embedder.js";
 import {
   DEFAULT_DUP_THRESHOLD,
   DEFAULT_RELATED_MIN,
@@ -123,6 +123,10 @@ export class FileStore implements MemoryStore {
    *  or the embedder fails (recall/near-dup then degrade to fuzzy for this call). */
   private async embed(text: string): Promise<number[] | undefined> {
     if (!this.embedder) return undefined;
+    // The bundled model is English-only, and on other scripts its "similarity" degenerates
+    // into "same script" — measured, with unrelated words outscoring true matches (D-065).
+    // Skipping it entirely is what leaves those languages on the lexical path, which works.
+    if (!isModelLanguage(text)) return undefined;
     try {
       return await this.embedder.embed(text);
     } catch (err) {
@@ -141,10 +145,37 @@ export class FileStore implements MemoryStore {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         return { schemaVersion: CURRENT_SCHEMA_VERSION, memories: [] };
       }
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === "EACCES" || e.code === "EPERM") {
+        throw new Error(
+          `jamgate cannot read the memory store at ${this.path} — permission denied. ` +
+            "Check the file's owner and mode (a service running as another user is the usual " +
+            "cause), or point JAMGATE_STORE at a path this process can read.",
+        );
+      }
       throw err;
     }
     if (raw.trim() === "") return { schemaVersion: CURRENT_SCHEMA_VERSION, memories: [] };
-    return migrate(JSON.parse(raw), this.ttl);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      // A corrupt store used to surface as a bare `Expected property name or '}' in JSON at
+      // position 2` through the MCP error channel — no file path, no cause, no next step. The
+      // user sees their agent report a JSON syntax error and has no way to connect that to a
+      // file on their own disk. Every save and every recall fails from then on, so this is the
+      // message someone reads at the worst possible moment. Say which file, say that nothing
+      // was destroyed (the writer refuses to overwrite what it could not read), and say what
+      // to do. (D-065)
+      throw new Error(
+        `jamgate cannot read the memory store at ${this.path} — it is not valid JSON ` +
+          `(${(err as Error).message}). Your memories have NOT been modified or deleted: ` +
+          "Jamgate refuses to overwrite a store it could not parse. Restore the file from a " +
+          "backup, or move it aside to start a fresh store — inspect it first, the contents " +
+          "are plain text and usually recoverable by hand.",
+      );
+    }
+    return migrate(parsed, this.ttl);
   }
 
   private async readAll(): Promise<Memory[]> {

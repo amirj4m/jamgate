@@ -37,6 +37,40 @@ const MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 const DIMENSIONS = 384;
 
 /**
+ * Is this text in a language the bundled model can actually represent?
+ *
+ * all-MiniLM-L6-v2 is an **English** model. Fed Persian, Greek, Chinese or Japanese it still
+ * returns a 384-dimensional vector — it just does not mean anything, and measurement shows
+ * exactly what it degenerates into: a similarity score for *"is this the same script"*.
+ *
+ *   0.62  "ποδήλατο" (bicycle)  ~  a Greek memory about studying Greek in Athens
+ *   0.46  "自転車"   (bicycle)  ~  a Chinese memory about coffee and languages
+ *   0.42  "دوچرخه"  (bicycle)  ~  a Persian memory about studying Greek and Linux
+ *   0.27  "コーヒー"  (coffee)   ~  a CHINESE memory that is partly about coffee
+ *
+ * Every one of those bicycles is unrelated to the memory it matched, and each outscores the
+ * true coffee match. Above the 0.35 recall floor (D-063), so a non-English user with the
+ * optional package installed got recall dominated by "is it in my language" noise — and after
+ * the tokenizer fix (D-065) their lexical recall finally worked, only for this to bury it.
+ *
+ * So the semantic layer is applied only to text the model was trained on. Non-Latin text is
+ * not embedded at all: no vector is stored, no semantic score is computed, and recall falls
+ * back to the fuzzy lexical path — which, unlike the embedding, genuinely works in any script.
+ * Mixed text (a Latin sentence with a few foreign words) still embeds; the bar is what the
+ * text is mostly made of, not purity.
+ *
+ * This is a property of the bundled model, not of embeddings in general. A multilingual model
+ * behind the same `Embedder` interface would lift the restriction, and that is the reason to
+ * want one.
+ */
+export function isModelLanguage(text: string): boolean {
+  const letters = text.match(/\p{L}/gu);
+  if (!letters || letters.length === 0) return true; // digits/symbols only — harmless either way
+  const latin = letters.filter((c) => /\p{Script=Latin}/u.test(c)).length;
+  return latin / letters.length >= 0.8;
+}
+
+/**
  * Try to build the real Transformers.js embedder. Returns null (never throws) when the
  * optional dependency or the model is unavailable, so the caller can fall back to fuzzy
  * recall. Embedding is opt-out via `JAMGATE_EMBEDDINGS=off`.

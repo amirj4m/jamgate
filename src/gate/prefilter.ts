@@ -41,6 +41,20 @@ export interface Verdict {
 /** Shortest text that can carry a durable fact. Below this it is a fragment, not a memory. */
 export const MIN_TEXT_LENGTH = 4;
 
+/**
+ * Longest text that can be one memory. There was no upper bound at all: a 200 KB save was
+ * accepted without comment, which is not a hypothetical — an agent that means to save a fact
+ * about a file can pass the file. The cost lands everywhere at once (the store is read whole
+ * on every operation, the decision log keeps the text, embeddings mean-pool it into noise) and
+ * the memory is useless anyway, because a memory that long is not one fact.
+ *
+ * 32 KB is deliberately far above anything legitimate — the longest real memory in the store
+ * this was measured on is about 1.8 KB, and the largest ever saved through a live agent was
+ * 1740 characters (D-037). Anything past this is an accident worth naming rather than a
+ * memory worth keeping, and the rejection says so instead of silently truncating.
+ */
+export const MAX_TEXT_LENGTH = 32_000;
+
 /** What the prefilter needs to know about the call beyond the text itself. */
 export interface PrefilterContext {
   /** The `type` the caller passed, if any (identity / project / preference / state). */
@@ -56,6 +70,18 @@ export function prefilter(text: string, ctx: PrefilterContext = {}): Verdict {
     return {
       ok: false,
       reason: `too short (${t.length} characters, minimum ${MIN_TEXT_LENGTH})`,
+    };
+  }
+
+  if (t.length > MAX_TEXT_LENGTH) {
+    return {
+      ok: false,
+      reason:
+        `too long (${t.length} characters, maximum ${MAX_TEXT_LENGTH}). A memory is one ` +
+        "durable fact, not a document — if this is file or transcript content, save the " +
+        "conclusion instead. Split it into separate facts and save them one at a time.",
+      // Never echo tens of kilobytes of unknown content into the decision log.
+      redact: true,
     };
   }
 

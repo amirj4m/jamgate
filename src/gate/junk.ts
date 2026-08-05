@@ -1,3 +1,5 @@
+import { splitWords } from "./relevance.js";
+
 // Non-fact detection (gate layer 1, D-043).
 //
 // A stress test walked twelve saves past the gate and three of them were not facts at all:
@@ -76,12 +78,18 @@ const TRANSIENT_MARKERS =
 const WEATHER =
   /\b(it'?s|it is|its)\s+(raining|snowing|drizzling|pouring|sunny|cloudy|overcast|foggy|windy|humid|hot|cold)\b|\b(raining|snowing|drizzling|pouring)\b|\b(the )?weather (in|is|today)\b|-?\d{1,2}\s?°\s?[cf]\b/i;
 
-/** Unicode-aware content tokens: letters/numbers only, punctuation and symbols dropped. */
+/**
+ * Unicode-aware content tokens: letters/numbers only, punctuation and symbols dropped.
+ *
+ * Splitting is shared with the recall scorer (`splitWords`) so the gate and recall cannot
+ * disagree about where the words are. They did: this function was Unicode-aware from the start
+ * — the Persian case is in its own test — but it split only on whitespace and punctuation, so
+ * a Chinese or Japanese sentence, written without spaces, counted as ONE token and every such
+ * memory was refused as "not a statement". The recall fix alone did nothing, because nothing
+ * in those languages could get past the gate to be recalled (D-065).
+ */
 export function meaningfulTokens(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((t) => t.length > 0);
+  return splitWords(text.toLowerCase());
 }
 
 /** True when `text` carries no statement: fewer than two tokens, only filler, or only

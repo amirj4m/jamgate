@@ -1531,3 +1531,90 @@ first-run path has to be *simulated adversarially* — new HOME, cold cache, pub
 no client installed, and a wrong command typed on purpose — or it ships untested. Note where
 the three defects landed: not one was in the gate, the part that had 463 tests. They were all
 in the thin layer between a person and the product, which had none.
+
+### D-065 — What a stranger finds in the first ten minutes that a maintainer never does
+
+D-064 tested the first-run *path*. This is what turned up when the running product was probed
+the way a skeptic probes it: in a language other than English, with malformed arguments, with
+absurd input, and with a broken file on disk. Four findings, one of them serious.
+
+**1. Recall did not work in any non-Latin script. At all.** The tokenizer split on
+`/[^a-z0-9]+/`, which does not ignore non-ASCII text — it deletes it. A Persian, Greek,
+Cyrillic, Arabic, Hebrew, Chinese or Japanese memory tokenized to *nothing*, so it could never
+be recalled by any query, not even by pasting a word straight out of its own text. Accented
+Latin was mangled the same way: "café" became "caf", "Müller" became "m" and "ller".
+
+The damning part is where this was found. **The store it was found on already contained
+Persian memories** — saved by the maintainer, through the real gate, months earlier. They had
+been unrecallable from the moment they were written, and nobody noticed, because the person
+testing recall always tested it in English. A save that reports `Saved:` and then cannot be
+found again is worse than a rejection: the product lies, quietly, in a way only a user of that
+language ever sees.
+
+Fixed by tokenizing on `\p{L}\p{N}` with diacritic folding, plus per-character segmentation
+for Han/Hiragana/Katakana (which have no spaces, so a sentence arrived as one token and the
+trigram scorer could not reach inside it). Ten languages are now asserted in the test suite —
+each with words taken literally out of the memory *and* an unrelated word that must not match,
+so a tokenizer that matches everything cannot pass. English tokenization is byte-identical.
+
+**2. There was no upper bound on a memory.** A 200 KB save was accepted in silence. Not
+hypothetical: an agent that means to save a fact about a file can pass the file, and the cost
+lands on the store (read whole on every operation), the decision log, and the embedding (which
+mean-pools it into noise). Now capped at 32 KB — roughly eighteen times the largest memory
+ever saved through a live agent — with a rejection that says to save the conclusion instead,
+and with the oversized body kept out of the log.
+
+**3. A corrupt store produced an unusable error.** Every save and recall failed with a bare
+`Expected property name or '}' in JSON at position 2` relayed through MCP: no file path, no
+cause, no next step, and no word about whether the user's memories still existed. That is the
+message someone reads at the worst possible moment. It now names the file, names the cause,
+states plainly that nothing was modified or deleted, and says what to do — and a test asserts
+the file really is left byte-identical, because the reassurance has to be true. Permission
+errors get the same treatment instead of a bare `EACCES`.
+
+**4. The gate refused Chinese and Japanese outright — and the recall fix alone did nothing.**
+Fixing the tokenizer made the *scorer* multilingual, and the end-to-end test still failed for
+those two languages, because they never reached the scorer: the junk filter rejects text with
+"fewer than two meaningful words", and it counted words by splitting on spaces. A Chinese
+sentence has none, so every such save was refused as "not a statement". The gate and the
+scorer disagreed about where words are; they now share one splitter, which is the only way
+that class of bug stays fixed. This is precisely what RULES §9 exists to catch — a unit-level
+fix that passes while the product still does not work.
+
+**5. The English model was silently deciding non-English recall.** With that fixed, the
+end-to-end test failed a third way: the query "自転車" (bicycle) returned a Chinese memory
+about coffee, and "bicycle" in Greek returned a Greek memory about studying Greek. Measured
+against the bundled all-MiniLM-L6-v2 — an **English** model — its similarity on other scripts
+degenerates into a score for *"is this the same script"*:
+
+| similarity | query ~ memory |
+| --- | --- |
+| 0.62 | "ποδήλατο" (bicycle) ~ a Greek memory about studying Greek in Athens |
+| 0.46 | "自転車" (bicycle) ~ a Chinese memory about coffee and languages |
+| 0.42 | "دوچرخه" (bicycle) ~ a Persian memory about Greek and Linux |
+| 0.27 | "コーヒー" (coffee) ~ a Chinese memory that IS partly about coffee |
+
+Every bicycle is unrelated, every one clears the 0.35 floor, and each outscores the true
+coffee match. So installing the optional package gave a non-English user recall driven by
+"is it in my language" — and it landed on top of the lexical recall that had just been fixed,
+burying it. Non-Latin text is no longer embedded at all: no vector stored, no semantic score,
+straight to the lexical path that actually works in those scripts. This is a limit of the
+bundled model, not of embeddings; a multilingual model behind the same `Embedder` interface
+would lift it, and that is now the concrete reason to want one.
+
+**6. What held.** Malformed tool arguments were already handled well: `text` as an object, a
+number, null, or missing all produce a precise error naming what arrived; path traversal in an
+id or a scope resolves to nothing; a negative or absurd `limit` is harmless; a corrupt store is
+never overwritten. Recall returns memories verbatim, which is inherent to memory systems and
+is now stated in the README's honest limits rather than left for a reader to discover and post
+about.
+
+**The general rule this encodes:** the bugs a maintainer cannot find are the ones behind an
+assumption so basic it never gets stated — here, "text is ASCII". Note how many layers the one
+assumption had quietly infected: the recall tokenizer, the junk filter's word count, and the
+choice of embedding model. Fixing the first two still left the product broken, and only an
+end-to-end run in each language showed it. Every test in the suite was
+written in English by someone who thinks in English, so a whole class of user got a product
+that silently did nothing, on a codebase with 470 passing tests. When testing your own work,
+the question is not "does it work?" but "what did I assume about the input?" — and then supply
+the opposite.

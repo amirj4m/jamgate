@@ -165,3 +165,55 @@ describe("FileStore recall and forget", () => {
     }
   });
 });
+
+/**
+ * A corrupt store is the worst moment to be handed a bad error message (D-065). Before this,
+ * every save and recall failed with a bare `Expected property name or '}' in JSON at position
+ * 2` relayed through MCP — no file path, no cause, no next step, and no reassurance that the
+ * user's memories still existed. The user sees their agent report a JSON syntax error with no
+ * way to connect it to a file on their own disk.
+ */
+describe("unreadable store: the message a user gets at the worst moment", () => {
+  it("names the file, the cause, and the fact that nothing was destroyed", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "jamgate-corrupt-"));
+    const path = join(dir, "memory.json");
+    const corrupt = '{ "memories": [ this is not json';
+    await fs.writeFile(path, corrupt);
+    try {
+      const store = new FileStore(path);
+      await assert.rejects(store.recall("anything"), (err: Error) => {
+        assert.match(err.message, /not valid JSON/);
+        assert.ok(err.message.includes(path), "the error must name the store path");
+        assert.match(err.message, /NOT been modified or deleted/);
+        return true;
+      });
+      // The promise of that message has to be true: a failed read must never let a write
+      // through that would flatten the file the user still needs.
+      await assert.rejects(store.save({ text: "jam wants to save a durable fact about himself", source: "user-explicit" }));
+      assert.equal(await fs.readFile(path, "utf8"), corrupt, "the corrupt store was modified");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("explains a permission error rather than leaking a bare EACCES", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "jamgate-perm-"));
+    const path = join(dir, "memory.json");
+    await fs.writeFile(path, JSON.stringify({ schemaVersion: CURRENT_SCHEMA_VERSION, memories: [] }));
+    await fs.chmod(path, 0o000);
+    try {
+      // Running as root defeats the mode bits entirely; skip rather than assert a falsehood.
+      let readable = true;
+      try { await fs.readFile(path, "utf8"); } catch { readable = false; }
+      if (readable) return;
+      await assert.rejects(new FileStore(path).recall("anything"), (err: Error) => {
+        assert.match(err.message, /permission denied/);
+        assert.ok(err.message.includes(path));
+        return true;
+      });
+    } finally {
+      await fs.chmod(path, 0o644);
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});

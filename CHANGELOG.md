@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-05
+
+What a skeptical stranger finds in the first ten minutes: the product probed in another
+language, with malformed arguments, with absurd input, and with a broken file on disk (D-065).
+
+### Fixed
+
+- **Recall did not work in any non-Latin script — at all.** The tokenizer split on
+  `/[^a-z0-9]+/`, which does not ignore non-ASCII text, it **deletes** it. A Persian, Greek,
+  Cyrillic, Arabic, Hebrew, Chinese or Japanese memory tokenized to nothing and could never be
+  recalled by any query — not even by pasting a word straight out of its own text. Accented
+  Latin was mangled the same way: "café" became "caf", "Müller" became "m" and "ller".
+
+  This was found on a store that **already contained Persian memories**, saved through the
+  real gate months earlier. They had been unrecallable since the day they were written, and
+  nobody noticed, because recall was only ever tested in English. A save that reports `Saved:`
+  and then cannot be found again is worse than a rejection.
+
+  Tokenization is now Unicode-aware (`\p{L}\p{N}`) with diacritic folding, so `café` and
+  `cafe` find each other, plus per-character segmentation for Han/Hiragana/Katakana — those
+  are written without spaces, so a whole sentence arrived as one token and the trigram scorer
+  could not reach inside it. Ten languages are asserted in the test suite, each with words
+  taken literally out of the memory *and* an unrelated word that must not match. **English
+  tokenization is byte-identical.**
+- **The gate refused Chinese and Japanese saves outright.** The junk filter rejects text with
+  "fewer than two meaningful words" and counted words by splitting on spaces — a Chinese
+  sentence has none, so every such memory was refused as "not a statement". The tokenizer fix
+  above did nothing on its own, because nothing in those languages could reach the scorer. The
+  gate and the recall scorer now share one word-splitter, which is what keeps them from
+  disagreeing again.
+- **The English embedding model was silently deciding non-English recall.** all-MiniLM-L6-v2
+  is an English model; on other scripts its similarity degenerates into a score for *"is this
+  the same script"*. Measured: "bicycle" in Greek scored **0.62** against an unrelated Greek
+  memory, "bicycle" in Japanese **0.46** against an unrelated Chinese one — both above the
+  0.35 recall floor, and both higher than a genuine coffee match at 0.27. Installing the
+  optional package therefore gave a non-English user recall driven by language rather than
+  meaning, burying the lexical recall that had just been fixed. Non-Latin text is no longer
+  embedded at all — no vector, no semantic score, straight to the lexical path that works.
+  A limit of the bundled model, not of embeddings: a multilingual model behind the same
+  `Embedder` interface would lift it.
+- **A corrupt store gave an error nobody could act on.** Every save and recall failed with a
+  bare `Expected property name or '}' in JSON at position 2` relayed through MCP: no file path,
+  no cause, no next step, and no word on whether the user's memories still existed. It now
+  names the file and the cause, states plainly that nothing was modified or deleted — with a
+  test asserting the file really is left byte-identical, because that reassurance has to be
+  true — and says what to do. Permission errors get the same treatment instead of a bare
+  `EACCES`.
+
+### Added
+
+- **An upper bound on a single memory (32 KB).** There was none: a 200 KB save was accepted in
+  silence. An agent that means to save a fact about a file can pass the file, and the cost
+  lands on the store, the decision log and the embedding at once. The cap is ~18× the largest
+  memory ever saved through a live agent; oversized saves are refused with a reason (save the
+  conclusion, split it up) rather than truncated, and the body is kept out of the decision log.
+
+### Documentation
+
+- **Honest limits now cover prompt injection.** Recall returns memory text verbatim into an
+  agent's context. The gate decides whether something is worth keeping, not whether it is safe
+  to act on. That is inherent to every memory system; Jamgate reduces the surface (never
+  scrapes screens, never mines chat logs, refuses credentials, requires an explicit save) but
+  it cannot make text inert. Better said by us than discovered by a reader.
+- README states that fuzzy recall works in any script, and where that support stops (English
+  stemming; per-character rather than per-word segmentation for Chinese and Japanese).
+
 ## [0.10.5] - 2026-08-05
 
 The first-run path, tested cold for the first time by anyone other than the maintainer: a

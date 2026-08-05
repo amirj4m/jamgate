@@ -182,3 +182,69 @@ describe("memoryRelevance — subject and type are matchable (D-036)", () => {
     assert.equal(memoryRelevance("typescript", { text }), relevanceScore("typescript", text));
   });
 });
+
+/**
+ * Recall in a language other than English (D-065).
+ *
+ * `tokenize` used to split on `/[^a-z0-9]+/`, which does not merely ignore non-ASCII text — it
+ * DELETES it. A Persian, Greek, Cyrillic, Arabic, Hebrew, Chinese or Japanese memory tokenized
+ * to nothing and could never be recalled, not even by pasting a word out of its own text, and
+ * accented Latin was mangled ("café" → "caf"). This was found on a store that had held
+ * unrecallable Persian memories since the day they were saved.
+ *
+ * Each case pairs a real sentence with words taken literally out of it, plus an unrelated word
+ * that must NOT match — a tokenizer that returns everything would pass the first half alone.
+ */
+describe("recall works in any script (D-065)", () => {
+  const CASES: Array<[string, string, string[], string]> = [
+    ["Persian", "جم هر روز صبح یونانی می‌خواند و کتاب لینوکس را دنبال می‌کند", ["یونانی", "لینوکس"], "قهوه"],
+    ["Greek", "ο Γιαμ μαθαίνει αρχαία ελληνικά κάθε πρωί", ["ελληνικά", "Γιαμ"], "καφές"],
+    ["Russian", "Джем изучает Linux и живёт в Афинах", ["Афинах", "изучает"], "погода"],
+    ["Arabic", "جام يعيش في أثينا ويعمل على مشروع الذاكرة", ["أثينا", "مشروع"], "طقس"],
+    ["Hebrew", "ג'אם גר באתונה ובונה מערכת זיכרון", ["באתונה", "זיכרון"], "מזג"],
+    ["Korean", "잼은 매일 아침 커피를 마시고 그리스어를 공부한다", ["커피", "그리스어"], "자전거"],
+    // No spaces in these two — they rely on the CJK character segmentation.
+    ["Chinese", "杰姆每天早上喝咖啡并学习希腊语", ["咖啡", "希腊语"], "自行车"],
+    ["Japanese", "ジャムは毎朝コーヒーを飲みギリシャ語を勉強する", ["コーヒー", "ギリシャ語"], "自転車"],
+  ];
+
+  for (const [language, text, present, absent] of CASES) {
+    it(`recalls a ${language} memory by a word from its own text`, () => {
+      assert.ok(tokenize(text).length > 1, `${language} tokenized to nothing usable`);
+      for (const word of present) {
+        assert.ok(
+          memoryRelevance(word, { text }) >= MIN_RELEVANCE,
+          `${language}: "${word}" is literally in the memory but did not match`,
+        );
+      }
+      assert.ok(
+        memoryRelevance(absent, { text }) < MIN_RELEVANCE,
+        `${language}: unrelated "${absent}" matched — the tokenizer is matching everything`,
+      );
+    });
+  }
+
+  it("folds diacritics so accented and unaccented spellings meet", () => {
+    const text = "jam préfère le café noir et Müller-Kaffee";
+    for (const query of ["café", "cafe", "Müller", "muller", "prefere"]) {
+      assert.ok(memoryRelevance(query, { text }) >= MIN_RELEVANCE, `"${query}" did not match`);
+    }
+    assert.deepEqual(tokenize("café Müller"), ["cafe", "muller"]);
+  });
+
+  it("segments CJK without swallowing embedded Latin", () => {
+    // The naive alternation bug: `\p{L}` matches Han too, so a plain `CJK|[\p{L}]+` consumed
+    // "iPhone用のアプリを作る" as one token from the first Latin character onward.
+    const tokens = tokenize("ジャムはiPhone用のアプリを作る");
+    assert.ok(tokens.includes("iphone"), `Latin run lost: ${JSON.stringify(tokens)}`);
+    assert.ok(tokens.includes("用"), `CJK after Latin lost: ${JSON.stringify(tokens)}`);
+    assert.ok(memoryRelevance("iPhone", { text: "ジャムはiPhone用のアプリを作る" }) >= MIN_RELEVANCE);
+  });
+
+  it("leaves plain English tokenization exactly as it was", () => {
+    assert.deepEqual(tokenize("jam uses Linux, and prefers TypeScript 5!"), [
+      "jam", "uses", "linux", "and", "prefers", "typescript", "5",
+    ]);
+    assert.deepEqual(tokenize(""), []);
+  });
+});

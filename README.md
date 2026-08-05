@@ -281,7 +281,11 @@ The skill is prompt text, not code — it is **not** part of the npm package (th
 ## Optional: local semantic search
 
 By default, recall is **fuzzy lexical** matching (stemming, typo-tolerance, trigrams) —
-fast, deterministic, and dependency-free, but blind to synonyms. To also match on
+fast, deterministic, and dependency-free, but blind to synonyms. It works in **any script**:
+Persian, Greek, Cyrillic, Arabic, Hebrew, Chinese, Japanese and Korean all tokenize and
+recall, and accents fold so `café` and `cafe` find each other. (Stemming is English-only, and
+Chinese/Japanese are segmented per character rather than per word — good enough to find a term
+inside a sentence, not a real word segmenter.) To also match on
 *meaning* (so "automobile" recalls a memory about your "car"), install the optional
 embedding backend:
 
@@ -306,6 +310,12 @@ Two limits are worth knowing before you install it:
 - **Long memories dilute.** The model mean-pools, so a short query against a 500-character
   memory scores lower than against a one-line fact. Synonym reach is strongest exactly where
   the README's example is — short, single-fact memories.
+- **English only.** all-MiniLM-L6-v2 is an English model, and on other scripts its
+  "similarity" collapses into *"is this the same language"* — measured, with the Greek for
+  *bicycle* scoring 0.62 against an unrelated Greek memory. So non-Latin text is deliberately
+  **not** embedded: those languages stay on fuzzy lexical recall, which works properly in
+  every script. Nothing is lost by installing the package if you write in Persian or Japanese;
+  nothing is gained either.
 
 ## Namespaces (scopes)
 
@@ -759,6 +769,16 @@ unchanged.
   host; it is not a distributed multi-node store.
 - **No TLS in the box.** If you skip the reverse proxy, you're sending a bearer token in the
   clear. Don't.
+- **A memory is text, and recall puts it in your agent's context.** The gate decides *whether*
+  something is worth keeping, not whether it is safe to act on. If a memory contains
+  instructions — because you saved a page that contained them, or an agent inferred a fact
+  from an untrusted source — those words come back verbatim on the next recall, in a place the
+  model reads. This is inherent to every memory system; Jamgate reduces the surface (it never
+  scrapes screens, never mines chat logs, refuses credentials, and requires an explicit
+  `save_memory` call) but it cannot make text inert. Treat your memory store as trusted input
+  and review what goes in — `jamgate export` prints all of it.
+- **One memory is one fact, up to 32 KB.** Larger saves are refused rather than truncated. If
+  you want a document remembered, save the conclusion.
 
 ## How it compares
 
