@@ -1199,3 +1199,45 @@ Both transports get it from the one shared pipeline, so they cannot drift (D-049
 in code at the boundary. A schema published to a model, a TypeScript union, and a doc comment
 are three kinds of documentation; none of them is a check. And when the enum decides a
 lifespan, the failure mode of not checking is silent data retention, not a loud error.
+
+### D-055 — A memory that is unreachable must be findable, and an explicit save must never go dark quietly
+
+Soft expiry (D-021) hides a stale record from recall and keeps it on disk for a grace window.
+That is the right mechanism. What was wrong is that it operated in complete silence — nothing
+in the save reply, the gate log, recall, or any command reported that a record had gone.
+
+Auditing the real production store measured the cost:
+
+```
+39 active records, 17 of them EXPIRED and invisible to recall  → 44% of the live memory
+   all type "state" (2-day TTL);  12 of the 17 were source "user-explicit"
+   one session, 2026-07-25 18:25–18:36: eFood pay structure, income by period, payment
+   reconciliations, bank card, subscriptions, e-ΕΦΚΑ registration, housing search, …
+```
+
+A human said "remember this", claude.ai filed it as `state`, and forty-eight hours later it
+was unreachable. No warning was possible to notice, because none existed anywhere.
+
+Two decisions, and deliberately not a third:
+
+- **Warn, do not override.** When a save is human-sourced (`user-explicit` / `user-confirmed`)
+  AND lands a lifespan of a week or less, the save happens exactly as asked and the reply
+  carries the expiry date plus how to make it durable. Refusing the combination would be wrong
+  — a short-lived fact explicitly given is legitimate ("jam is between apartments this week")
+  — and silently promoting it to a durable type would be worse: it overrides a caller that may
+  have meant precisely what it said. The caller has the conversation; give it the fact and let
+  it decide, which is the same hand-off D-045 makes. Agent-inferred state notes do not warn;
+  warning on every one would train callers to ignore the warning.
+- **Make expiry discoverable.** `store.listExpired(scope)` (an OPTIONAL adapter capability, so
+  a backend without TTL is unaffected), surfaced three ways: `jamgate expired` lists them with
+  the date compaction may delete each one, `recall_memory` appends the hidden count — including
+  on an empty result, where "nothing is stored" and "everything aged out" otherwise look
+  identical — and `GET /v1/memory?expired=1` returns them, with `expiredHidden` on ordinary
+  recalls.
+- **Not changed: the TTL values themselves.** `state` = 2 days is right for what `state`
+  means (RULES §4). The failure was a caller choosing the wrong type and nobody noticing;
+  lengthening the window would hide that class of mistake rather than surface it.
+
+**The general rule this encodes:** any mechanism that makes data unreachable without deleting
+it owes the user a way to enumerate what it has hidden. "Soft delete" with no listing is
+indistinguishable from data loss from every angle a user can actually look from.

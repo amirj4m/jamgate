@@ -464,8 +464,41 @@ export class FileStore implements MemoryStore {
       }
       if (!target) return { ok: false, reason: "not-found" };
       await this.writeAll(memories.filter((m) => m !== target));
-      return { ok: true, id: target.id };
+      // Hand the deleted record back so the caller can log the reversal (D-056).
+      return { ok: true, id: target.id, memory: target };
     });
+  }
+
+  /**
+   * Records that are ACTIVE but past their expiry — hidden from recall, still on disk (D-055).
+   *
+   * Soft expiry was designed as a quiet mechanism, and that turned out to be the problem: an
+   * audit of the real production store found 17 of 39 live records expired and invisible, with
+   * no way to discover them short of parsing the JSON by hand. A record that is unreachable but
+   * not gone has to be *findable*, or the store silently shrinks and nothing reports it.
+   *
+   * Ordered soonest-compacted first, so the most urgent losses are at the top. Each carries
+   * `compactableAt`: the moment maintenance may physically delete it, which is the real
+   * deadline for rescuing it. Read-only, so no lock (the atomic write path means a reader
+   * always sees a whole file).
+   */
+  async listExpired(
+    scope?: string,
+  ): Promise<Array<{ memory: Memory; compactableAt: string }>> {
+    const now = Date.now();
+    const wantScope = normalizeScope(scope);
+    return (await this.readAll())
+      .filter(
+        (m) =>
+          memScope(m) === wantScope && m.status === "active" && isExpired(m.expiresAt, now),
+      )
+      .map((m) => ({
+        memory: m,
+        compactableAt: new Date(
+          new Date(m.expiresAt as string).getTime() + this.graceMs,
+        ).toISOString(),
+      }))
+      .sort((a, b) => a.compactableAt.localeCompare(b.compactableAt));
   }
 
   /**
