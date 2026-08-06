@@ -4,6 +4,31 @@ Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
 
+> ### ✅ README REWRITTEN FOR LAUNCH — 0.11.1 (2026-08-06; D-066)
+>
+> npm, droplet and registry all on **0.11.1**. Docs-only release, no code change.
+>
+> **Why:** the Mem0/Zep benchmark disputes (rigged-prompt accusations, a 25.56-point
+> arithmetic error, corrections from both sides) mean readers now assume any memory project's
+> numbers are cooked. A post claiming to beat Mem0 scores 2–4 points on HN. What survives is a
+> comparison that concedes rows — so **`Honest limits` is the most valuable thing in the
+> README, not a liability**. Three changes:
+> 1. **`Honest limits` promoted to a top-level section above the feature list.** It was buried
+>    at line 759/884 inside *Remote mode* and contained only remote caveats. It now names the
+>    real ones: 10/17 top-1 recall, nobody outside jam has installed it, macOS/Windows never
+>    run, no `reindex`, the store seam has no adapter, quality is regexes and cosine thresholds
+>    not judgment, one JSON file untested past ~100 records.
+> 2. **The comparison table now has rows Jamgate loses** (retrieval, semantic understanding,
+>    entity reasoning, scale, multi-user, SDKs, maturity) and closes by sending readers to Mem0
+>    for retrieval and Zep for graphs. It previously won or tied every differentiating row and
+>    used ✅/❌ to mean opposite things in different columns.
+> 3. **First person, one developer.** The README had no "I" anywhere and said "we" for a solo
+>    project. Removed the AI tells: tricolons, "not X, it's Y" pairs, aphorisms, seven
+>    identical Status bullets, ~20% of the em-dashes (128 in 884 lines).
+>
+> **If anyone edits the README later: do not "improve" the table back into a clean sweep.**
+> A table whose author wins every row is evidence they weren't really comparing.
+
 > ### ✅ PRE-LAUNCH HARDENING — 0.11.0 IS PUBLIC (2026-08-05)
 >
 > npm `latest` = **0.11.0**, the droplet runs **0.11.0**, the MCP registry is current, and
