@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-08-06
+
+Every number in the README checked against its actual source (D-067). Three did not survive.
+No code changed.
+
+### Documentation
+
+- **The "97.8% junk" figure is gone, and it was load-bearing.** The whole argument for a
+  write-time gate rested on it, cited only as "a production audit of a leading memory system".
+  Reading the source ([mem0 issue #4573](https://github.com/mem0ai/mem0/issues/4573)) it is one
+  user, one agent, 32 days, with a 2-billion-parameter local model doing extraction for 20 of
+  those days; the frontier-model batch scored 89.6%; the largest junk category is the reporter's
+  own system prompt being re-extracted; and **the issue is closed with a mem0 maintainer
+  describing fixes shipped in April 2026.** Quoting the worst number from a since-addressed
+  report of a since-changed pipeline is exactly what this category has been punished for.
+
+  The README now argues from the artifact instead: **808 entries asserting "User prefers Vim"
+  in a system where nobody used Vim** — one hallucination re-extracted from its own recall
+  output — with the caveats stated in the open, and then the claim that actually survives them:
+  with nothing between extraction and storage, a hallucination stored once is re-extracted
+  forever. No percentage required. `RULES.md` §0 and `AGENTS.md` repeated the bare figure and
+  now carry the caveat plus an instruction not to cite it as a bare fact.
+- **The embedding model download was documented as "~23 MB, quantized". It is 86 MB and not
+  quantized.** Transformers.js fetches the fp32 model by default (the server logs as much on
+  every start) and the cache directory measures 87 MB. Four times understated, and worst for
+  anyone on a metered connection or a small VPS. Now stated as ~90 MB, with the old figure named
+  as wrong.
+- **The "$5–7/month" hosting estimate is now dated**, with a pointer to check the platforms'
+  pricing rather than this README's.
+- **`grep` gets its own column in the comparison table, and wins rows.** Letta benchmarked plain
+  files plus `grep` and semantic search against Mem0 on LoCoMo and the files won — 74.0% versus
+  68.5% with GPT-4o mini. That column beats Jamgate on retrieval, scale, language support and
+  maturity, and costs nothing. What it has no concept of is *writing*: duplicates, contradictions
+  and stale facts stay in your files until you edit them yourself, which is the entire bet of
+  this project stated where a reader can weigh it. Jamgate has never been run on LoCoMo and the
+  README says so.
+- Release count corrected (23), and the recall limit now points at the `grep` column.
+
 ## [0.11.1] - 2026-08-05
 
 A README rewrite before going public, on the reasoning in D-066. No code changed.

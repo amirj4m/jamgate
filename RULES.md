@@ -14,7 +14,12 @@ unless every relevant rule below is demonstrably satisfied. If in doubt → not 
 - **The quality GATE is the mechanism, not the headline.** Storage is a commodity
   (mem0, Graphiti, Cognee, Supermemory already own it). Our job is to keep that
   shared memory **clean, current, contradiction-free, and time-aware** at write time —
-  otherwise sharing just spreads junk (one mem0 audit found 97.8% junk; see D-016).
+  otherwise sharing just spreads junk. **Do not cite the "97.8% junk" figure as a bare fact**
+  (see D-067): it comes from ONE user's audit in mem0 issue #4573, a 2B local model did the
+  extraction for 20 of its 32 days, the frontier-model batch was 89.6%, and the issue is closed
+  with maintainer fixes shipped. The durable point is structural: with no gate between
+  extraction and storage, one stored hallucination is re-extracted forever (808 entries said
+  "User prefers Vim"; nobody used Vim).
 - **Neutral and store-agnostic — by design, and only by design so far.** The gate must never
   be locked to one store or one vendor: everything above `src/store/` depends on the
   `MemoryStore` interface, never on `FileStore`. But be exact about what that means today:
@@ -120,8 +125,8 @@ not kept as live facts.
 
 ## 5. Decision logic — hybrid pipeline (NOT pure-AI, NOT pure-rules)
 
-Pure "LLM, extract memories" is exactly what produces the junk problem (one mem0
-audit found 97.8%; see D-016). Pure hard-coded rules can't make a semantic judgment. So:
+Pure "LLM, extract memories" is what produces the junk problem — see D-016 and the citation
+caveats in §0. Pure hard-coded rules can't make a semantic judgment. So:
 
 1. **Cheap rule pre-filter** — kill the obvious junk (too short, pleasantries, no
    real content, recent duplicate) *before* spending any AI.

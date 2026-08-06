@@ -1669,3 +1669,67 @@ losses in it makes the wins legible.
 overclaiming, the highest-value thing you can publish is the list of things your project does
 not do. Write the limits section first, put it above the feature list, and make the comparison
 table cost you something — then the parts where you win are worth reading.
+
+### D-067 — The 97.8% figure was load-bearing and would not have survived a click
+
+The README's argument for a write-time gate rested on one sentence: *"one production audit of a
+leading memory system found 97.8% of its stored entries were junk."* Attributed only as "a
+production audit of a leading memory system", with a bare link.
+
+Someone would have clicked it. What they find, in
+[mem0 issue #4573](https://github.com/mem0ai/mem0/issues/4573):
+
+- **N = 1.** One user, one AI agent, one human, 32 days, a Qdrant backend.
+- **A 2-billion-parameter local model did the extraction for 20 of the 32 days** (`gemma2:2b`
+  via Ollama). The headline percentage is dominated by that model's output.
+- **The frontier-model batch scored 89.6%, not 97.8%** — still terrible, but a different number
+  from the one being quoted as though it characterised the product.
+- **The largest junk category is not what the sentence implies.** 52.7% of the junk is the
+  user's own boot file and system prompt being re-extracted every session, which is a
+  configuration and feedback-loop problem as much as an extraction-quality one.
+- **The issue is CLOSED**, and a mem0 maintainer has posted describing a Token-Efficient Memory
+  Algorithm shipped in April 2026 aimed at exactly these failures.
+
+So the citation was quoting the worst available number from a since-addressed report of a
+since-changed pipeline, while implying it was a general property of the category. That is the
+same move the Mem0/Zep benchmark disputes punished, and it would have taken the credibility of
+everything near it down with it. In a launch README where the honest-limits section is the main
+asset, one unsafe number poisons the well.
+
+**The fix is to argue from the artifact instead of the aggregate.** The README now leads with
+the concrete case — **808 entries asserting "User prefers Vim" in a system where nobody used
+Vim**, one hallucination re-extracted from its own recall output — then states the caveats
+plainly (N=1, the 2B model, 89.6% on the frontier batch, issue closed with fixes shipped), and
+then says what actually survives them: *with nothing between extraction and storage, a
+hallucination stored once is re-extracted forever.* That claim is structural, needs no
+percentage, and a better model does not fix it.
+
+**A trap worth recording:** the issue is internally inconsistent. Its summary paragraph says
+"668 copies of a single feedback-loop hallucination" while the section heading says "808 copies
+of a hallucination" (808 entries asserting the preference, 191 of them byte-identical, 668
+removed in the first triage sweep). Quote one number and a reader finds the other in the same
+document. This is why the README quotes the Exhibit heading's framing and describes what the
+entries *were* rather than leaning on a count.
+
+**Two other figures failed the same audit**, found by checking each number against its source
+rather than against the last version of the README:
+
+- **The embedding model download was documented as "~23 MB, quantized". It is 86 MB and not
+  quantized.** Transformers.js fetches the fp32 model by default — the server even logs `dtype
+  not specified for "model". Using the default dtype (fp32)` on every start — and the cache
+  directory measures 87 MB. Four times understated, and it matters most to the people least
+  able to absorb it: anyone on a metered connection or a small VPS. (The project's own droplet
+  has 458 MB of RAM.) Now stated as ~90 MB, with the old wrong figure named.
+- **"$5–7/month" for Railway or Render** was an undated claim about someone else's pricing. Now
+  dated, with a pointer to check their pricing rather than mine.
+
+`RULES.md` §0 and `AGENTS.md` repeated the bare 97.8% too, so they now carry the caveat and an
+explicit instruction not to cite the figure as a bare fact.
+
+**The general rule this encodes:** a number you did not measure yourself is a liability
+proportional to how load-bearing it is. Before publishing one, open the source and read past
+the headline — check the sample size, check what produced it, check whether the strongest
+version of the number is the one you are quoting, and check whether the thing being criticised
+has since responded. If the figure cannot survive a reader clicking the link, the argument must
+not depend on it. Prefer the concrete artifact: "808 entries saying 'User prefers Vim'" cannot
+be re-analysed away, and it is a better argument than any percentage.

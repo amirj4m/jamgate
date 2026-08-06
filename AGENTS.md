@@ -26,8 +26,10 @@ impact-driven, not a profit play.**
 ## The core idea (why it exists)
 
 Every agent you use is an island: each has its own memory and none share. Naive
-sharing fails because the systems that store everything bloat with junk — one mem0
-production audit found 97.8% junk (github.com/mem0ai/mem0 issue #4573). Storing is
+sharing fails because the systems that store everything bloat with junk: in mem0 issue #4573
+one user's store held 808 entries asserting "User prefers Vim" when nobody used Vim — one
+hallucination re-extracted from its own recall output. (Cite that case carefully; the
+headline percentage from it does not survive scrutiny. See D-067 and RULES §0.) Storing is
 solved (mem0, Graphiti, Cognee, Supermemory…) and even salience is mostly the calling
 agent's job. The unsolved seam is **a neutral layer that keeps ONE shared memory
 clean, time-aware and contradiction-free across every agent**, sitting in front of

@@ -29,10 +29,24 @@ early on and the problem it created was worse than the one it solved: within a w
 full of "jam is on a call", the same fact three times in slightly different words, and a
 stale preference from a month earlier being handed to an agent as though it were current.
 
-I'm not the only one. A production audit of one leading memory system found 97.8% of its
-stored entries were junk — duplicates, trivia, one-off chatter, dead states
-([issue #4573](https://github.com/mem0ai/mem0/issues/4573)). If you share memory across
-agents without filtering it, all you have built is a faster way to spread junk.
+The clearest public example of where this ends up is
+[mem0 issue #4573](https://github.com/mem0ai/mem0/issues/4573), where a user audited their own
+production store of 10,134 entries by hand. The detail I keep coming back to is this one: **808
+entries asserting "User prefers Vim". Nobody in that system used Vim.** The extraction model
+hallucinated it once, it got stored, it came back in the next session's recall context, and the
+pipeline re-extracted it from its own output as though it were a fresh fact.
+
+Read that report carefully before you lean on it, though. It is one person, one agent, 32 days,
+and a 2-billion-parameter local model did the extraction for the first 20 of those days. The
+headline "97.8% junk" is dominated by that weak model; in the batch extracted by a frontier
+model the rate was 89.6%. The issue is now closed, and a mem0 maintainer has since described
+changes shipped in April 2026 aimed squarely at these problems.
+
+So I don't want to lean on the percentage, and this README used to. The part that survives all
+of those caveats is structural, and no model upgrade fixes it: **if there is nothing between
+extraction and storage, a hallucination that gets stored once will be re-extracted forever.**
+A better model changes how articulate the junk is. Sharing that memory across every agent you
+own just distributes it faster.
 
 So Jamgate sits in the write path and decides what gets stored:
 
@@ -45,7 +59,7 @@ So Jamgate sits in the write path and decides what gets stored:
    │ "I use Linux"                     │   │ ✓ saved — durable, changes answers   │
    │ "my name is Sam" (agent guessed)  │   │ ⚠ conflict — lower trust, ask first  │
    └──────────────────────────────────┘   └──────────────────────────────────────┘
-     everything piles up, 98% junk           small, and still true
+     it all piles up, forever                 small, and still true
 ```
 
 It runs as an [MCP](https://modelcontextprotocol.io) server, so any MCP client (Claude Code,
@@ -92,9 +106,11 @@ I wrote — the right memory came back at rank 1 in **10 of 17** cases, and appe
 in the top 5 in 13. Turning on the optional embeddings *used* to make this worse than leaving
 them off; that's fixed, but "the answer is in there somewhere" is still an accurate
 description of recall on a store of any size. This is the weakest part of the project and
-the thing I'd fix next.
+the thing I'd fix next. For scale: Letta measured plain files plus `grep` at 74.0% on LoCoMo
+against Mem0's 68.5%, and I have no reason to think Jamgate's retrieval would beat either.
+See [How it compares](#how-it-compares), where `grep` gets its own column.
 
-**Nobody outside me has installed it.** Twenty-two releases, ten supported clients, one user.
+**Nobody outside me has installed it.** Twenty-three releases, ten supported clients, one user.
 I've simulated a cold install (fresh `HOME`, empty npm cache, published package rather than
 my working copy) and it held up, but simulation is not a stranger on their own machine.
 
@@ -348,12 +364,14 @@ embedding backend:
 npm install @huggingface/transformers
 ```
 
-On first use it downloads a small sentence-embedding model (all-MiniLM-L6-v2, ~23 MB,
-quantized) and runs it **entirely on your machine — no text is ever sent to any cloud
-AI.** With it enabled, recall blends semantic similarity into the ranking, and a save
-that is semantically near-identical to an existing memory comes back as a
-`possible_duplicate` for you to confirm. **If the package isn't installed, Jamgate runs
-on fuzzy recall — nothing breaks.**
+On first use it downloads all-MiniLM-L6-v2 and runs it **entirely on your machine — no text is
+ever sent to any cloud AI**. Budget about **90 MB** for that download: this README used to say
+"~23 MB, quantized", which was wrong on both counts. Transformers.js fetches the fp32 model by
+default and the cached directory measures 87 MB on disk, so on a small VPS or a metered
+connection, plan for the real number. With the model in place, recall blends semantic
+similarity into the ranking, and a save that means the same as an existing memory comes back as
+a `possible_duplicate` for you to confirm. **If the package isn't installed, Jamgate runs on
+fuzzy recall and nothing breaks.**
 
 **What to expect from it, measured rather than assumed** ([D-063](./DECISIONS.md)): the
 thresholds are set from real cosines on this model over a real store, not from estimates.
@@ -534,7 +552,8 @@ set up for you).
 **What you should know first (honest version):**
 
 - **You pay the platform directly. I host nothing.** A tiny always-on instance with a small
-  persistent disk runs roughly **$5–7/month** on Railway or Render. That bill is between you and
+  persistent disk was roughly **$5–7/month** on Railway or Render when I last checked in August
+  2026, and platform pricing moves — check theirs, not mine. That bill is between you and
   the platform; Jamgate takes no cut and runs no cloud.
 - **Your instance, your data.** The memory store lives on a disk *in your account* on *your*
   platform. Jamgate never sees it, never proxies it, has no telemetry. A deploy button is
@@ -831,28 +850,46 @@ These are on top of the [general limits](#honest-limits) above.
 
 ## How it compares
 
-There are no benchmark numbers here. This category has had two of them retracted in public
-and I am not adding a third from a project with one user. What follows is a capability
-comparison, and the rows where Jamgate loses are the ones worth reading.
+There are no benchmark numbers here. This category has had two of them retracted in public and
+I am not adding a third from a project with one user.
 
-| | **Jamgate** | **Mem0 / OpenMemory** | **Zep / Graphiti** |
-| --- | --- | --- | --- |
-| Core model | Rule-based gate in front of a flat file | LLM-extracted memory layer | Temporal knowledge graph |
-| Where memory lives | A JSON file on your machine | Hosted platform or self-hosted store | Graph server (self-hosted or cloud) |
-| Gate before write | Core design | Partial (dedup/update) | Partial |
-| Source-trust hierarchy | Yes | Not that I can find | Not that I can find |
-| Refers conflicts back to you | Yes | No | No |
-| LLM calls of its own | None | Required | Required |
-| Dependencies / infra | 1 runtime dep, no server | SDK + service/DB | Graph DB + service |
-| **Retrieval quality** | **Weak.** Fuzzy lexical + optional local embeddings; 10/17 top-1 on my own store | **Better.** Real vector retrieval, reranking, tuned over many deployments | **Better.** Graph traversal plus vector search |
-| **Understands what a memory means** | **No.** Regexes, subject matching, cosine thresholds | **Yes.** LLM extraction is the whole design | **Yes.** Entity and relationship extraction |
-| **Entity / relationship reasoning** | **None.** Flat records with a `subject` string | Some | **This is what it is for** |
-| **Scale** | **Untested past ~100 records.** One file, read whole, no index | Production deployments | Production deployments |
-| **Multi-user / teams** | **No.** One instance, one person, one token | Yes | Yes |
-| **Language support** | Lexical recall in any script; semantic is **English-only** | Multilingual models | Multilingual models |
-| **SDKs** | MCP and a small REST API | **Python, TS, and more** | **Python, TS, and more** |
-| **Maturity** | **One developer, one user, seventeen releases** | Funded team, wide adoption | Funded team, wide adoption |
-| Best for | One person's cross-agent memory, kept small and current, on their own disk | Application-scale memory with real retrieval | Relationship and temporal reasoning |
+The column that should worry me most is the last one. Letta benchmarked plain markdown files
+with `grep` and semantic search against Mem0 on LoCoMo and the files won — **74.0% versus
+68.5%** with GPT-4o mini
+([their write-up](https://www.letta.com/blog/benchmarking-ai-agent-memory)). That is somebody
+else's benchmark of somebody else's system, and Jamgate has never been run on LoCoMo, so I
+cannot tell you where it would land. But the honest reading is that a directory of text files
+and a twenty-year-old command-line tool is a serious baseline, and any memory product that
+cannot say why it beats that baseline probably doesn't.
+
+| | **Jamgate** | **Mem0 / OpenMemory** | **Zep / Graphiti** | **Plain files + `grep`** |
+| --- | --- | --- | --- | --- |
+| Core model | Rule-based gate in front of a flat file | LLM-extracted memory layer | Temporal knowledge graph | A directory of text |
+| Where memory lives | A JSON file on your machine | Hosted platform or self-hosted store | Graph server (self-hosted or cloud) | Files on your machine |
+| Gate before write | Core design | Partial (dedup/update) | Partial | **None** |
+| Duplicates | Exact + optional semantic | Yes | Yes | **Pile up forever** |
+| Superseding an outdated fact | By `subject`, automatically | Partial | Yes, temporally | **You edit the file** |
+| Source-trust hierarchy | Yes | Not that I can find | Not that I can find | **No such concept** |
+| Expiry of volatile state | By type, automatic | Partial | Yes | **Never** |
+| LLM calls of its own | None | Required | Required | **None** |
+| Dependencies / infra | 1 runtime dep, no server | SDK + service/DB | Graph DB + service | **Zero. You have it already** |
+| **Retrieval quality** | **Weak.** Fuzzy lexical + optional local embeddings; 10/17 top-1 on my own store | Real vector retrieval and reranking, tuned over many deployments | Graph traversal plus vector search | **Beat Mem0 on LoCoMo** (74.0 vs 68.5) |
+| **Understands what a memory means** | **No.** Regexes, subject matching, cosine thresholds | Yes — LLM extraction is the whole design | Yes — entity and relationship extraction | **No** |
+| **Entity / relationship reasoning** | **None.** Flat records with a `subject` string | Some | This is what it is for | **None** |
+| **Scale** | **Untested past ~100 records.** One file, read whole, no index | Production deployments | Production deployments | **Millions of lines, fine** |
+| **Multi-user / teams** | **No.** One instance, one person, one token | Yes | Yes | **Whatever your filesystem does** |
+| **Language support** | Lexical recall in any script; semantic is **English-only** | Multilingual models | Multilingual models | **Any bytes at all** |
+| **SDKs** | MCP and a small REST API | Python, TS, and more | Python, TS, and more | **Every language ever written** |
+| **Maturity** | **One developer, one user, 23 releases** | Funded team, wide adoption | Funded team, wide adoption | **Older than all of us** |
+| Best for | One person's cross-agent memory, kept small and current, on their own disk | Application-scale memory with real retrieval | Relationship and temporal reasoning | Almost certainly your first thing to try |
+
+Read that last column honestly: `grep` beats Jamgate on retrieval, scale, language support, and
+every kind of maturity, and it costs nothing because you already have it. What it has no
+concept of is *writing* — every duplicate, every contradiction and every stale fact stays in
+your files until you go and edit them yourself. That is the entire bet of this project: that
+for a memory several agents write to unattended, the write side is where the work is. If you
+are happy curating the files yourself, curate the files yourself. You will probably get better
+retrieval than I can give you.
 
 The Jamgate column is checked by the test suite and by the measurements in
 [`DECISIONS.md`](./DECISIONS.md). The other two are read from those projects' public
@@ -873,8 +910,8 @@ the embedding model all run on your machine.
 
 Two things do touch the network, both of them downloads and neither carrying your text: `npx`
 fetching the package from npm, and — only if you installed the optional semantic package — the
-embedding model's first-run download from Hugging Face (~23 MB, then cached). Both stop after
-install.
+embedding model's first-run download from Hugging Face (about 90 MB, then cached). Both stop
+after install.
 
 There is also a local decision log. Every gate verdict (saved, duplicate, superseded,
 conflict, possible_duplicate, rejected) is appended to a size-capped JSONL file that rotates
