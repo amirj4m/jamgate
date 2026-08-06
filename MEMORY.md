@@ -4,6 +4,38 @@ Current state of the project. Update this at the end of every work session.
 
 ## Where we are right now
 
+> ### ✅ NUMBERS AUDITED — 0.11.2 (2026-08-06; D-067)
+>
+> npm, GitHub master and the release are all on **0.11.2** and the npm tarball README is
+> byte-identical to master (checked; an earlier report of "two different READMEs live" was a
+> stale CDN snapshot — GitHub's default branch is `master`, `main` does not exist, and nothing
+> in the repo points at it).
+>
+> **The "97.8% junk" citation was a liability and it was load-bearing.** Traced to mem0 issue
+> #4573: N=1, one agent, 32 days, **a 2B local model did extraction for 20 of them**, the
+> frontier-model batch was **89.6%**, the largest junk category is the reporter's own system
+> prompt being re-extracted (52.7%), and **the issue is CLOSED with a maintainer describing
+> fixes shipped April 2026**. Also: the issue contradicts itself — "668 copies" in its summary
+> vs "808 copies" in its Exhibit B heading — so quoting either count invites a reader to find
+> the other. README now argues from the artifact (**808 entries asserting "User prefers Vim"
+> when nobody used Vim**) with caveats visible, then the structural claim that survives them
+> all: with nothing between extraction and storage, one stored hallucination is re-extracted
+> forever. RULES §0 and AGENTS.md carried the bare figure too; both now warn against citing it.
+>
+> **`grep` has its own column in the comparison table and wins rows.** Letta measured plain
+> files + grep at **74.0% vs Mem0's 68.5%** on LoCoMo (verified at letta.com). It beats Jamgate
+> on retrieval, scale, language support and maturity, free. What it cannot do is *write* —
+> that is the whole bet, now stated where a reader can weigh it. Jamgate has never run LoCoMo
+> and the README says so.
+>
+> **Two more figures were wrong:** the embedding download was documented "~23 MB, quantized"
+> and is actually **86 MB, fp32** (Transformers.js defaults to fp32; cache dir is 87 MB) — now
+> ~90 MB. The "$5–7/month" hosting estimate is now dated.
+>
+> **Rule going forward:** any number not measured here gets its source opened and read past the
+> headline before it ships — sample size, what produced it, whether the strongest version is
+> the one quoted, and whether the criticised party has since responded.
+
 > ### ✅ README REWRITTEN FOR LAUNCH — 0.11.1 (2026-08-06; D-066)
 >
 > npm, droplet and registry all on **0.11.1**. Docs-only release, no code change.
