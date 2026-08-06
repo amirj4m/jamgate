@@ -1618,3 +1618,54 @@ written in English by someone who thinks in English, so a whole class of user go
 that silently did nothing, on a codebase with 470 passing tests. When testing your own work,
 the question is not "does it work?" but "what did I assume about the input?" — and then supply
 the opposite.
+
+### D-066 — The README is written by a person, and the comparison table concedes rows
+
+Two changes to how this project presents itself, both made for the same reason: in this
+particular category, at this particular moment, credibility is the scarce resource and
+polish actively spends it.
+
+**Context that decided it.** The memory-benchmark disputes between Mem0 and Zep — public
+accusations of rigged prompts, a 25.56-point arithmetic error, corrections published by both
+sides — left readers assuming any memory project's numbers are cooked until shown otherwise.
+A post claiming to beat Mem0 now scores 2–4 points on Hacker News. What still survives that
+audience is a comparison where the author concedes rows. So the `Honest limits` section is not
+a liability to be minimised before a launch. It is the most valuable thing in the README.
+
+**1. First person, and the limits promoted to the top.** `Honest limits` was a subsection of
+*Remote mode*, at line 759 of 884 — a reader who never self-hosts would never reach it, and
+what it contained were remote-mode caveats (token handling, no multi-tenancy) rather than the
+product's real weaknesses. It is now a top-level section immediately after the gate table,
+before the feature list, and it names what actually matters: recall ranks the right memory
+first in 10 of 17 measured cases; nobody outside the author has installed it; macOS and
+Windows have never been run; there is no `reindex`; "store-agnostic" is a seam with no
+adapter behind it; the quality decisions are regexes and cosine thresholds, not judgment.
+
+The voice changed with it. The README had no first person anywhere and used "we" for a
+one-person project, which reads as either a company or a generated artifact — and the second
+guess is the fatal one right now. A reader who concludes "AI slop" in the first ten lines
+never reaches the substance, however good the code is. So the tells went: the tricolons
+("small, accurate, and contradiction-free"), the *it's not X, it's Y* constructions ("a gate,
+not a store"; "memory quality, not storage"; "impact, not profit"), the aphoristic antitheses
+("sharing memory is the easy part"), the seven identically-shaped Status bullets, and about a
+fifth of the em-dashes (128 in 884 lines, one every seven).
+
+**2. The comparison table now has rows Jamgate loses.** As written, Jamgate won or tied every
+differentiating row, and the one concession — a "their strength" row — had "—" in our own
+column, which reads as *we have no weakness to declare*. The `❌ none` / `✅ required` pair for
+LLM calls was worse: the same tick meant "good" in one column and "bad" in another, which is
+the kind of thing a hostile reader spots in seconds and then distrusts everything else.
+
+Six rows were added where Jamgate genuinely loses — retrieval quality, semantic understanding,
+entity reasoning, scale, multi-user, SDK breadth, maturity — with the numbers that make the
+loss concrete (10/17 top-1; untested past ~100 records; one developer, one user). The closing
+line now sends readers to Mem0 for retrieval and Zep for graphs.
+
+That is not modesty. A table where the author's project wins everything is evidence the author
+was not really comparing, so every row becomes worthless including the true ones. A table with
+losses in it makes the wins legible.
+
+**The general rule this encodes:** when the field you are entering has just been burned by
+overclaiming, the highest-value thing you can publish is the list of things your project does
+not do. Write the limits section first, put it above the feature list, and make the comparison
+table cost you something — then the parts where you win are worth reading.

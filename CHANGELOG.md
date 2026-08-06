@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-08-05
+
+A README rewrite before going public, on the reasoning in D-066. No code changed.
+
+### Documentation
+
+- **`Honest limits` is now a top-level section, above the feature list.** It was a subsection
+  of *Remote mode*, at line 759 of 884, so a reader who never self-hosts would never reach it —
+  and what it held were remote-mode caveats rather than the product's real weaknesses. It now
+  names them: recall puts the right memory first in 10 of 17 measured cases; nobody outside the
+  author has installed it; macOS and Windows have never actually been run; there is no
+  `reindex` command; "store-agnostic" is a seam with no adapter behind it; the quality
+  decisions are regexes and cosine thresholds rather than judgment; one JSON file, untested
+  past ~100 records. The remote-specific caveats stay where they were, as *Remote mode limits*.
+- **The comparison table now includes rows Jamgate loses.** As written it won or tied every
+  differentiating row, and the `❌ none` / `✅ required` pair used the same tick to mean "good"
+  in one column and "bad" in another. Six rows added where Mem0 and Zep are genuinely better —
+  retrieval quality, semantic understanding, entity reasoning, scale, multi-user, SDK breadth,
+  maturity — with the numbers that make the loss concrete. The section now closes by sending
+  readers to Mem0 for retrieval and Zep for graph reasoning. A table whose author wins every
+  row is evidence they were not really comparing, which makes the true rows worthless too.
+- **The prose is written in first person, by one developer.** The README had no first person
+  anywhere and used "we" for a solo project. Removed the constructions that made it read as
+  generated rather than written: the tricolons ("small, accurate, and contradiction-free"), the
+  *it's not X, it's Y* pairs ("a gate, not a store"; "memory quality, not storage"; "impact,
+  not profit"), the aphorisms ("sharing memory is the easy part"), the seven identically-shaped
+  Status bullets, and roughly a fifth of the em-dashes (128 in 884 lines).
+- **Privacy section states that the decision log holds memory text**, and how to turn it off.
+  True before, and not said plainly.
+
 ## [0.11.0] - 2026-08-05
 
 What a skeptical stranger finds in the first ten minutes: the product probed in another
